@@ -309,6 +309,9 @@ open.sume.com keys pay in US dollars from your open.sume.com balance; top up und
 
 ## Scripts and agents
 
+**From code**, the same API has official clients: [`sume`](https://github.com/sumelabs/sume-python) for Python (`sume.run("gpt-image-2", "a kite", quality="low").save("kite.png")`) and [`@sume-com/open`](https://github.com/sumelabs/sume-js) for JavaScript and TypeScript on the server.
+
+
 **`--json`** prints exactly one JSON document on stdout for every command, errors included, and nothing on stderr. Abridged:
 
 ```console
