@@ -101,6 +101,8 @@ export class MockApi {
   nextArtifacts = 1;
   /** Add a `stage: "poster"` frame to every new job's result. */
   nextPoster = false;
+  /** Answer the next submits like a provider refusal: 502 with the job already failed. */
+  refuseAtSubmit = false;
   readsUntilDone = 2;
   balanceUsd = 10;
   url = "";
@@ -165,6 +167,13 @@ export class MockApi {
       return;
     }
 
+    if (req.method === "GET" && path === "/health") {
+      return send(
+        200,
+        { service: "mock", status: "ok", build: { commit_sha: "0123456789abcdef" } },
+        { "x-sume-api-surface": "public" },
+      );
+    }
     if (req.method === "GET" && path === "/v1/open/catalog")
       return send(200, { data: { currency: "USD", models: MODELS } });
     if (req.method === "GET" && path.startsWith("/v1/open/catalog/")) {
@@ -208,6 +217,19 @@ export class MockApi {
           details: { errors: [{ path: "model", message: "must have required property 'model'" }] },
         });
       const key = (req.headers["idempotency-key"] as string | undefined) ?? null;
+      if (this.refuseAtSubmit) {
+        const job = this.#createJob("image_generation", body, key);
+        job.status = "failed";
+        job.error = {
+          code: "provider_submission_failed",
+          message: 'Application "imagen4" not found',
+          retryable: false,
+        };
+        return error(502, "provider_submission_failed", 'Application "imagen4" not found', {
+          retryable: false,
+          details: { request_id: job.id, job: this.#jobView(job) },
+        });
+      }
       const existing = key ? [...this.jobs.values()].find((j) => j.idempotency_key === key) : undefined;
       const job =
         existing ?? this.#createJob(path.includes("image") ? "image_generation" : "video_generation", body, key);

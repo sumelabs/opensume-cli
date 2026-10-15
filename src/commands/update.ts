@@ -140,12 +140,14 @@ export function isStandaloneBinary(): boolean {
 }
 
 async function latestVersion(ctx: Context): Promise<string | undefined> {
-  const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
-    headers: { accept: "application/vnd.github+json", "user-agent": ctx.userAgent },
-    signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(15_000)]),
-  }).catch((cause: unknown) => {
-    throw new CliError("Could not reach GitHub to check for updates.", { code: "network_error", cause });
-  });
+  const res = await ctx
+    .fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
+      headers: { accept: "application/vnd.github+json", "user-agent": ctx.userAgent },
+      signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(15_000)]),
+    })
+    .catch((cause: unknown) => {
+      throw new CliError("Could not reach GitHub to check for updates.", { code: "network_error", cause });
+    });
   if (res.status === 404) return undefined;
   if (!res.ok)
     throw new CliError(`GitHub answered ${res.status} while checking for updates.`, { code: "update_check_failed" });
@@ -154,7 +156,7 @@ async function latestVersion(ctx: Context): Promise<string | undefined> {
 }
 
 async function fetchBytes(ctx: Context, url: string): Promise<Buffer> {
-  const res = await fetch(url, {
+  const res = await ctx.fetch(url, {
     headers: { "user-agent": ctx.userAgent },
     redirect: "follow",
     signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(300_000)]),

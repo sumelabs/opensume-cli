@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
 import { relative } from "node:path";
 import { ApiError } from "../api/errors.ts";
-import type { Artifact, CatalogModel, Estimate, Job, ResultResponse, StatusResponse } from "../api/types.ts";
+import type { Artifact, CatalogModel, Estimate, Job, JobEvent, ResultResponse, StatusResponse } from "../api/types.ts";
 import type { Context } from "../context.ts";
 import { closest, type FlagSpec } from "../lib/args.ts";
 import { downloadTo, planPaths, type SavedFile } from "../lib/download.ts";
-import { CliError, ExitCode } from "../lib/errors.ts";
+import { CliError, ExitCode, UsageError } from "../lib/errors.ts";
 import { formatBytes, formatDuration, formatUsd } from "../lib/ui.ts";
 import { parseDuration, waitForJob } from "../lib/wait.ts";
 
@@ -171,7 +171,7 @@ export const WAIT_FLAGS: readonly FlagSpec[] = [
     type: "string",
     placeholder: "<path>",
     section: "Output",
-    description: "Save to this file, or into this directory",
+    description: 'Save to this file, into this directory, or by a template like "out/{model}-{job}-{index}.{ext}"',
   },
   {
     name: "no-download",
@@ -192,6 +192,12 @@ export const WAIT_FLAGS: readonly FlagSpec[] = [
     type: "boolean",
     section: "Output",
     description: "Also save intermediate files, like a video's poster frame",
+  },
+  {
+    name: "logs",
+    type: "boolean",
+    section: "Output",
+    description: "Print the job's events as they happen (with --json, add them to the document)",
   },
 ];
 
@@ -282,20 +288,29 @@ export async function followJob(ctx: Context, options: FollowOptions): Promise<n
   const price = options.usd ? ` · ${formatUsd(options.usd)}` : "";
   ctx.jobId = options.jobId;
 
+  const tail = flags.logs === true ? eventTail(ctx, options.jobId) : undefined;
+  const printEvents = async () => {
+    if (!tail) return;
+    for (const event of await tail.pull())
+      if (!json) for (const line of eventLines(ctx, event, tail.firstAt)) ui.info(line);
+  };
   const status = await waitForJob(client, options.jobId, {
     timeoutMs,
     signal: ctx.signal,
     firstDelaySeconds: options.firstDelaySeconds,
     sleep: ctx.sleep,
+    onPoll: printEvents,
     onStatus: (s) => ui.spin(progressLine(ctx, label + price, s, options.startedAt)),
     onRetry: (error) => ui.debug(`status read failed, retrying: ${error.message}`),
     onDelay: (delay, hint) => ui.debug(`next status read in ${delay}s${hint !== null ? ` (API hint ${hint}s)` : ""}`),
   });
   ui.stopSpinner();
+  await printEvents();
+  const logs = tail ? { events: tail.all } : {};
 
   if (status.sume_status !== "completed") {
     const job = await client.getJob(options.jobId, ctx.signal).catch(() => undefined);
-    return reportFailure(ctx, options, status, job);
+    return reportFailure(ctx, { ...options, extra: { ...options.extra, ...logs } }, status, job);
   }
 
   const result = await readResult(ctx, options.jobId);
@@ -339,6 +354,7 @@ export async function followJob(ctx: Context, options: FollowOptions): Promise<n
         return file ? { ...a, path: file.path, bytes: file.bytes } : a;
       }),
       ...options.extra,
+      ...logs,
     });
   } else {
     ui.success(`${label} completed in ${elapsed}${price}`);
@@ -372,7 +388,10 @@ export async function followJob(ctx: Context, options: FollowOptions): Promise<n
  */
 export function selectArtifacts(artifacts: readonly Artifact[], all: boolean): Artifact[] {
   if (all) return [...artifacts];
-  const finals = artifacts.filter((a) => !a.stage);
+  let finals = artifacts.filter((a) => !a.stage);
+  // An image beside a video is its poster or thumbnail, even when the API
+  // leaves it unlabelled (vidu-q4 does; grok-imagine-video marks `poster`).
+  if (finals.some((a) => a.type === "video")) finals = finals.filter((a) => a.type !== "image");
   return finals.length > 0 ? finals : [...artifacts];
 }
 
@@ -414,18 +433,37 @@ async function readResult(ctx: Context, jobId: string): Promise<ResultResponse> 
 }
 
 function reportFailure(ctx: Context, options: FollowOptions, status: StatusResponse, job: Job | undefined): number {
+  return reportJobFailure(ctx, {
+    jobId: options.jobId,
+    model: options.model,
+    state: status.sume_status,
+    error: job?.error ?? status.job?.error ?? null,
+    ...(options.extra ? { extra: options.extra } : {}),
+  });
+}
+
+/** A job that ended `failed` or `canceled`: exit 5, with the API's reason. */
+export function reportJobFailure(
+  ctx: Context,
+  failure: {
+    jobId: string;
+    model: string | null | undefined;
+    state: string;
+    error: { message?: string; retryable?: boolean } | null;
+    extra?: Record<string, unknown>;
+  },
+): number {
   const { ui } = ctx;
-  const error = job?.error ?? status.job?.error ?? null;
-  const state = status.sume_status;
+  const { error, state } = failure;
   const message = error?.message ?? (state === "canceled" ? "The job was canceled." : "The job failed.");
   if (ctx.json) {
     ui.json({
-      job: { id: options.jobId, model: options.model ?? null, status: state },
+      job: { id: failure.jobId, model: failure.model ?? null, status: state },
       error: error ?? { message },
-      ...options.extra,
+      ...failure.extra,
     });
   } else {
-    ui.error(`${options.model ?? "Job"} ${state}: ${message}`, failureHint(options.jobId, error?.retryable));
+    ui.error(`${failure.model ?? "Job"} ${state}: ${message}`, failureHint(failure.jobId, error?.retryable));
   }
   return ExitCode.JobFailed;
 }
@@ -457,5 +495,83 @@ export function jobRow(job: Job) {
     status: job.status,
     created_at: job.created_at,
     completed_at: job.completed_at,
+  };
+}
+
+const FULL_JOB_ID = /^job_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+
+/**
+ * A job id, or a unique prefix of one: the 8 characters the CLI puts in file
+ * names (`gpt-image-2-0ae33f04.png`) find their job among the newest 500.
+ */
+export async function resolveJobId(ctx: Context, input: string): Promise<string> {
+  const raw = input.trim();
+  if (FULL_JOB_ID.test(raw)) return raw;
+  const prefix = raw.replace(/^job_/u, "").toLowerCase();
+  if (!/^[0-9a-f-]{4,}$/u.test(prefix)) {
+    throw new UsageError(
+      `"${input}" is not a job id.`,
+      "Job ids look like job_7513b52d-3669-…; a unique start of one works too.",
+    );
+  }
+  const matches = new Set<string>();
+  let after: string | undefined;
+  for (let page = 0; page < 5; page++) {
+    const list = await ctx.client().listJobs({ limit: 100, ...(after ? { starting_after: after } : {}) }, ctx.signal);
+    for (const job of list.jobs) if (job.id.slice(4).startsWith(prefix)) matches.add(job.id);
+    if (matches.size > 1 || !list.next_cursor) break;
+    after = list.next_cursor;
+  }
+  if (matches.size === 1) return [...matches][0] as string;
+  if (matches.size === 0) {
+    throw new CliError(`No job starting with "${prefix}" among your newest 500.`, {
+      exitCode: ExitCode.Rejected,
+      code: "not_found",
+      hint: "Use the full id from `opensume jobs list`.",
+    });
+  }
+  throw new UsageError(`"${input}" matches more than one job: ${[...matches].join(", ")}.`, "Give more of the id.");
+}
+
+/** One event as a line: offset from the first event, type, message, and any error under it. */
+export function eventLines(ctx: Context, event: JobEvent, firstAt: number): string[] {
+  const { c } = ctx.ui;
+  const offset = firstAt ? `+${formatDuration(Math.max(Date.parse(event.created_at) - firstAt, 0))}` : "";
+  const type =
+    event.status === "failed" ? c.red(event.type) : event.status === "succeeded" ? c.green(event.type) : event.type;
+  const lines = [`${c.dim(offset.padStart(8))}  ${type}${event.message ? `  ${c.dim(event.message)}` : ""}`];
+  const error = (event.data as { error?: { message?: string } } | undefined)?.error;
+  if (error?.message) lines.push(`${" ".repeat(10)}${c.red(error.message)}`);
+  return lines;
+}
+
+/**
+ * Follow a job's events: each call fetches them and hands back the ones not
+ * seen yet. Reads that fail are skipped; the next call catches up.
+ */
+export function eventTail(ctx: Context, jobId: string) {
+  const seen = new Set<string>();
+  const all: JobEvent[] = [];
+  let firstAt = 0;
+  return {
+    all,
+    get firstAt() {
+      return firstAt;
+    },
+    async pull(): Promise<JobEvent[]> {
+      const res = await ctx
+        .client()
+        .listEvents(jobId, undefined, ctx.signal)
+        .catch(() => undefined);
+      const fresh: JobEvent[] = [];
+      for (const event of res?.events ?? []) {
+        if (seen.has(event.id)) continue;
+        seen.add(event.id);
+        if (!firstAt) firstAt = Date.parse(event.created_at) || 0;
+        all.push(event);
+        fresh.push(event);
+      }
+      return fresh;
+    },
   };
 }

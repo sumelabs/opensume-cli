@@ -30,6 +30,27 @@ export class ApiError extends CliError {
     this.body = body;
   }
 
+  /**
+   * The job a refused submit created anyway: the API answers some provider
+   * refusals with the job already `failed` in `details.job`.
+   */
+  failedJob():
+    | { id: string; model: string | null; status: string; error?: { message?: string; retryable?: boolean } }
+    | undefined {
+    const job = (this.details as { job?: unknown } | undefined)?.job as
+      | { id?: unknown; model?: unknown; status?: unknown; error?: unknown }
+      | undefined;
+    if (!job || typeof job.id !== "string" || (job.status !== "failed" && job.status !== "canceled")) return undefined;
+    return {
+      id: job.id,
+      model: typeof job.model === "string" ? job.model : null,
+      status: job.status,
+      ...(job.error && typeof job.error === "object"
+        ? { error: job.error as { message?: string; retryable?: boolean } }
+        : {}),
+    };
+  }
+
   /** Field-level problems from `details.errors[]`, one line each. */
   fieldErrors(): string[] {
     const errors = (this.details as { errors?: unknown } | undefined)?.errors;
@@ -86,6 +107,10 @@ function hintFor(status: number, body: ApiErrorBody): string | undefined {
       break;
   }
   if (status === 429) return "Slow down and retry after a moment.";
-  if (status >= 500) return "This is on Sume's side. Retry, and quote the request id if it persists.";
+  if (status >= 500) {
+    return body.retryable === false
+      ? "This is on Sume's side, and the same request will fail again. Quote the request id to support."
+      : "This is on Sume's side. Retry, and quote the request id if it persists.";
+  }
   return undefined;
 }

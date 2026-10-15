@@ -6,7 +6,7 @@ import { pipeline } from "node:stream/promises";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { backoffMs, sleep } from "../api/client.ts";
 import type { Artifact } from "../api/types.ts";
-import { CliError } from "./errors.ts";
+import { CliError, UsageError } from "./errors.ts";
 import { extensionFor } from "./media.ts";
 
 export interface SavedFile {
@@ -52,6 +52,7 @@ async function exists(path: string): Promise<boolean> {
  */
 export async function planPaths(artifacts: readonly Artifact[], options: PlanOptions): Promise<string[]> {
   const exts = artifacts.map((a) => extensionFor(a.content_type, a.url, a.type));
+  if (options.output && isTemplate(options.output)) return fillTemplate(options.output, artifacts, exts, options);
   const many = artifacts.length > 1;
   const stem = `${(options.model ?? "sume").replace(/[^A-Za-z0-9._-]+/gu, "-")}-${shortJobId(options.jobId)}`;
 
@@ -140,4 +141,51 @@ export async function downloadTo(url: string, path: string, options: DownloadOpt
       });
     }
   }
+}
+
+const TOKENS = ["model", "job", "job_id", "index", "ext", "type"] as const;
+
+export const isTemplate = (output: string) => /\{[a-z_]+\}/u.test(output);
+
+/** Refuse a template with tokens the CLI does not fill, before anything is paid for. */
+export function checkTemplate(output: string | undefined): void {
+  if (!output || !isTemplate(output)) return;
+  for (const [, token] of output.matchAll(/\{([a-z_]+)\}/gu)) {
+    if (!(TOKENS as readonly string[]).includes(token as string)) {
+      throw new UsageError(
+        `-o has an unknown token {${token}}.`,
+        `Use ${TOKENS.map((t) => `{${t}}`).join(", ")}; for example -o "out/{model}-{job}-{index}.{ext}".`,
+      );
+    }
+  }
+}
+
+/**
+ * \`-o "out/{model}-{job}-{index}.{ext}"\`: one name per file. Without
+ * {index}, several files get -2, -3…; without {ext}, the type's extension
+ * is added. Named files are overwritten, like any explicit -o name.
+ */
+function fillTemplate(
+  template: string,
+  artifacts: readonly Artifact[],
+  exts: string[],
+  options: PlanOptions,
+): string[] {
+  checkTemplate(template);
+  return artifacts.map((artifact, i) => {
+    const ext = (exts[i] as string).replace(/^\./u, "");
+    let name = template
+      .replaceAll("{model}", (options.model ?? "sume").replace(/[^A-Za-z0-9._-]+/gu, "-"))
+      .replaceAll("{job_id}", options.jobId)
+      .replaceAll("{job}", shortJobId(options.jobId))
+      .replaceAll("{index}", String(i + 1))
+      .replaceAll("{type}", artifact.type)
+      .replaceAll("{ext}", ext);
+    const given = extname(name);
+    if (!template.includes("{index}") && i > 0) {
+      name = given ? `${name.slice(0, -given.length)}-${i + 1}${given}` : `${name}-${i + 1}`;
+    }
+    if (!template.includes("{ext}") && !extname(name)) name = `${name}.${ext}`;
+    return resolve(options.cwd, name);
+  });
 }

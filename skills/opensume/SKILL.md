@@ -20,7 +20,9 @@ opensume models --kind video --json         # kinds: image, video, lipsync, capt
 opensume models seedance-2-mini --json      # one model: inputs, limits, price options, notes
 ```
 
-Read a model's `capabilities` and `constraints` before building a request: they list the allowed resolutions, durations, aspect ratios and required inputs.
+Read a model's `capabilities` and `constraints` before building a request: they list the allowed resolutions, durations, aspect ratios and required inputs. `opensume schema <model> --json` lists every request field with its type, limits and the flag that sets it; fields without a flag go through `--set field=value`.
+
+Check the setup first when something fails: `opensume doctor --json` checks the key, the API host and the media host.
 
 ## Price it, then run it
 
@@ -43,6 +45,8 @@ Video can take minutes. To avoid blocking:
 opensume run kling-3 "…" -d 5 --no-wait --json        # returns {"job": {"id": "job_…"}, …} at once
 opensume jobs wait job_… -o ./out/ --json              # later: waits and saves
 ```
+
+`--logs --json` adds the job's events to the result; `opensume jobs events <id> --follow --json` prints them as JSON lines while the job runs. Job ids can be shortened to their first 8 characters.
 
 If a wait times out (exit 6) or is interrupted (exit 130), the job keeps running. Resume it with `opensume jobs wait <id>`; the error names the job. Do not resubmit: a second submit is a second charge. If the submit itself failed, the error carries `idempotency_key`; pass it back with `--idempotency-key` to adopt the job if it was created.
 

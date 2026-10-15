@@ -58,6 +58,7 @@ skills/           a skill that teaches coding agents to use the CLI
 ```sh
 npm test            # unit and end-to-end tests, about a second
 npm run check       # lint, typecheck, test and build: what CI runs
+npm run sync-schema # refresh the vendored router schemas from the API (then commit the result)
 ```
 
 End-to-end tests run the real `main()` against `test/helpers/mock-api.ts`, a local stand-in for the Open API, so they need no key and spend nothing. When you change how the CLI talks to the API, update the mock to match the API's documented behavior, and add a test that covers the change.

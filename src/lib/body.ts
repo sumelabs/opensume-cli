@@ -3,6 +3,7 @@ import type { Router } from "../api/client.ts";
 import type { CatalogModel } from "../api/types.ts";
 import { CliError, ExitCode, UsageError } from "./errors.ts";
 import { isHttpUrl } from "./media.ts";
+import { fieldAt, typedValue } from "./schema.ts";
 
 /** What `run` and `estimate` read from the command line. */
 export interface InputFlags {
@@ -124,7 +125,7 @@ export async function buildBody(
   videoOnly("generate-audio", "generate_audio", flags["generate-audio"]);
   set("webhook_url", flags.webhook);
 
-  for (const entry of flags.set ?? []) applySet(body, entry);
+  for (const entry of flags.set ?? []) applySet(body, entry, router);
   delete body.model;
   // Lip-sync and captions are billed by the clip's length, which the API
   // requires up front; without it the price is refused with no hint why.
@@ -147,7 +148,7 @@ const nonEmpty = (list: string[] | undefined) => (list && list.length > 0 ? list
  * booleans, arrays, objects) and a string otherwise. `a.b=1` sets a nested
  * field; `key[]=value` appends to a list.
  */
-export function applySet(body: Record<string, unknown>, entry: string): void {
+export function applySet(body: Record<string, unknown>, entry: string, router?: Router): void {
   const eq = entry.indexOf("=");
   if (eq <= 0) throw new UsageError(`--set takes key=value (got "${entry}").`);
   let key = entry.slice(0, eq).trim();
@@ -164,7 +165,8 @@ export function applySet(body: Record<string, unknown>, entry: string): void {
   if (path.length === 1 && path[0] === "model") {
     throw new UsageError("--set cannot change the model; it is the first argument of the command.");
   }
-  const value = parseValue(raw);
+  // With the router known, the field's own type decides: `prompt=1984` stays text.
+  const value = router ? typedValue(fieldAt(router, path), key, raw, parseValue) : parseValue(raw);
   let target = body;
   for (const part of path.slice(0, -1)) {
     const next = target[part];

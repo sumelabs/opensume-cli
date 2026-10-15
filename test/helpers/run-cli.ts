@@ -17,6 +17,19 @@ export class Capture implements Stream {
   }
 }
 
+/** Tests never reach GitHub or the real media host; everything else goes to the mock API. */
+const offlineFetch: typeof globalThis.fetch = async (input, init) => {
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  if (url.startsWith("https://api.github.com/")) {
+    return new Response(JSON.stringify({ tag_name: "v0.1.0" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  if (url.startsWith("https://media.sume.com/")) return new Response(null, { status: 404 });
+  return globalThis.fetch(input, init);
+};
+
 export interface CliResult {
   code: number;
   stdout: string;
@@ -51,6 +64,7 @@ export async function runCli(
     stdout,
     stderr,
     sleep: () => new Promise((resolve) => setImmediate(resolve)),
+    fetch: offlineFetch,
     ...(options.signal ? { signal: options.signal } : {}),
   });
   return {

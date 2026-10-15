@@ -4,6 +4,27 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-15
+
+Found by running every model on api.dev through the published 0.1.0, and by holding the CLI up against fal's genmedia.
+
+### Added
+
+- `opensume schema <model>` (alias `inputs`): every field the model's endpoint takes, with its type, limits, choices and the flag that sets it. `--full` gives whole descriptions; `--json` gives the schema. `opensume run <model> --help` ends with the same table. The schema ships in the CLI and works offline (`npm run sync-schema` refreshes it).
+- `--logs` on `run` and `jobs wait`: the job's events as they happen. With `--json`, they are added to the document as `events`.
+- `jobs events --follow` (alias `jobs logs`): tails a job until it ends; with `--json`, one event per line.
+- `-o` templates: `{model}`, `{job}`, `{job_id}`, `{index}`, `{ext}`, `{type}`. A bad template is refused before anything is submitted.
+- `opensume upload <url>`: copies a remote file into Sume storage.
+- `opensume doctor`: checks the version, config, API host and build, catalog, key and media host; exits non-zero on a failure.
+- Job ids may be shortened to a unique start, such as the 8 characters in a file name.
+
+### Fixed
+
+- `--set` values follow the field's type, so `--set prompt=1984` stays text. Unknown fields get a warning with a suggestion before they are priced or sent; the free estimate silently ignores them.
+- A job that the provider refuses at submit (for example a retired model) is reported as a failed job, exit 5, instead of a retryable server error.
+- Server errors suggest a retry only when the API says the request is retryable.
+- A video's poster image is skipped by default even when the API does not label it (vidu-q4).
+
 ## [0.1.0] - 2026-10-15
 
 The first release: every model on open.sume.com, from the terminal.
@@ -22,5 +43,6 @@ The first release: every model on open.sume.com, from the terminal.
 - Standalone binaries for macOS (arm64, x64), Linux (x64, arm64; glibc and musl) and Windows x64, built to run on CPUs without AVX2. Checksum-verified `install.sh` and `install.ps1`, an npm tarball on each release, and `opensume update`.
 - An agent skill in `skills/opensume`.
 
-[Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/sumelabs/opensume-cli/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sumelabs/opensume-cli/releases/tag/v0.1.0

@@ -1,8 +1,9 @@
 import { basename } from "node:path";
 import type { Context } from "../context.ts";
 import type { CommandSpec, Parsed } from "../lib/args.ts";
-import { buildBody, type InputFlags, localMediaPaths, replaceMedia } from "../lib/body.ts";
+import { buildBody, type InputFlags, localMediaPaths, replaceMedia, routerFor } from "../lib/body.ts";
 import { ExitCode, UsageError } from "../lib/errors.ts";
+import { unknownFields } from "../lib/schema.ts";
 import { formatUsd } from "../lib/ui.ts";
 import { INPUT_FLAGS, pricingNotes, resolveModel } from "./shared.ts";
 
@@ -44,7 +45,7 @@ async function estimateCommand(parsed: Parsed, ctx: Context): Promise<number> {
   const result = await ctx.client().estimate(model.id, body, ctx.signal);
   ui.stopSpinner();
 
-  const notes = pricingNotes(body, result);
+  const notes = [...unknownFields(routerFor(model), body), ...pricingNotes(body, result)];
   if (ctx.json) {
     ui.json(notes.length ? { ...result, warnings: notes } : result);
     return ExitCode.Ok;

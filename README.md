@@ -137,10 +137,12 @@ Try it
 |---|---|
 | [`run`](#run) | Generate an image or a video and save it |
 | [`estimate`](#estimate) | Price a request in dollars, free, with no key |
-| [`upload`](#upload) | Upload local files and print their media URLs |
+| [`upload`](#upload) | Upload local files, or copy URLs, to Sume storage |
 | [`models`](#models) | List models and prices, or show one |
-| [`jobs`](#jobs) | List, wait for, inspect and cancel jobs |
+| [`schema`](#schema) | Every input a model takes: type, limits, choices, flag |
+| [`jobs`](#jobs) | List, wait for, inspect, follow and cancel jobs |
 | [`auth`](#auth) | Save, check or forget your key |
+| [`doctor`](#doctor) | Check the install, the key and the connection |
 | `completion` | Shell completion for bash, zsh and fish |
 | `update` | Update a standalone install to the latest release |
 | `version` | Print the version |
@@ -168,19 +170,24 @@ opensume run veed-lipsync --video talk.mp4 --audio line.wav -d 6
 # Burn captions into a clip (fields without a flag go through --set)
 opensume run veed-subtitles --video clip.mp4 -d 12 --set captions.style=glass
 
-# Submit now, collect later
+# Submit now, collect later (a job id's first 8 characters are enough)
 opensume run kling-3 "a red kite over a beach" -d 5 --no-wait
-opensume jobs wait job_...
+opensume jobs wait 7513b52d
+
+# Watch the job's events as they happen, and name the files yourself
+opensume run seedance-2-mini "a paper boat" -d 4 --logs -o "out/{model}-{job}.{ext}"
 ```
 
 | Flags | |
 |---|---|
 | **Inputs** | `-p, --prompt` · `-i, --image` (repeatable) · `--end-image` · `--video` · `--audio` · `--ref-image`, `--ref-video`, `--ref-audio` (repeatable) · `--mask`. Each takes a public https URL or a local file. |
 | **Settings** | `-a, --aspect-ratio` · `-r, --resolution` · `-d, --duration` · `-q, --quality` · `-n, --num-images` · `--format` · `--size` · `--background` · `--[no-]generate-audio` · `--set key=value` for any other field (JSON values, `a.b` nesting, `key[]=` to append) · `--input body.json` (or `-` for stdin) |
-| **Output** | `-o, --output <file or dir/>` · `--no-download` (print URLs) · `--all-files` (also save intermediate files, like a video's poster frame) · `--timeout 20m` · `--open` |
+| **Output** | `-o, --output <file, dir/ or template>` · `--logs` (stream the job's events) · `--no-download` (print URLs) · `--all-files` (also save intermediate files, like a video's poster frame) · `--timeout 20m` · `--open` |
 | **Submit** | `--max-usd <dollars>` · `--dry-run` (print the request and price) · `--no-wait` · `--webhook <url>` · `--idempotency-key <key>` |
 
-A flag that a model's endpoint does not take is refused before anything is sent: `--duration` on an image model, for example. Ctrl-C stops waiting, not the job: the CLI prints the job id, and `opensume jobs wait <id>` picks it up later.
+A flag that a model's endpoint does not take is refused before anything is sent: `--duration` on an image model, for example. A `--set` field the endpoint does not have gets a warning with a suggestion (`qualty` → `quality`), and `--set` values follow the field's type, so `--set prompt=1984` stays text. Ctrl-C stops waiting, not the job: the CLI prints the job id, and `opensume jobs wait <id>` picks it up later.
+
+`-o` takes a file name, a directory (ending in `/`), or a template with `{model}`, `{job}` (8 characters), `{job_id}`, `{index}`, `{ext}` and `{type}`. Named files and templates overwrite; the default names never do.
 
 ### estimate
 
@@ -194,7 +201,8 @@ $0.3516  seedance-2-mini · 4s · 480p · 40.176 × 1000 video tokens
 ### upload
 
 ```sh
-opensume upload photo.png clip.mp4      # prints one media URL per file
+opensume upload photo.png clip.mp4                 # prints one media URL per file
+opensume upload https://example.com/shared/a.mp4   # copies a remote file in, for links that expire
 ```
 
 ### models
@@ -207,16 +215,37 @@ opensume models seedance                # filter by any word
 opensume models veed-subtitles          # one model: inputs, limits, prices, notes
 ```
 
+### schema
+
+```console
+$ opensume schema veed-subtitles
+veed-subtitles — inputs for POST /v1/video-router/generate
+
+FIELD                       TYPE                           FLAG
+video_url                   url                            --video
+    Source clip for video-to-video models.
+captions                    object                         --set
+    Caption models only (veed-subtitles): burns styled lines into video_url.
+  captions.style *          string                         --set
+      The caption style (see the model's catalog constraints).
+duration                    integer 2–600                  -d, --duration
+…
+```
+
+`schema` lists every field of the model's endpoint with its type, limits, choices and the flag that sets it; `--full` prints whole descriptions and `--json` the schema itself. `opensume run <model> --help` ends with the same table. The schema ships inside the CLI (taken from the API's OpenAPI document at release), so it works offline.
+
 ### jobs
 
 ```sh
 opensume jobs list [--status processing] [--limit 50]
-opensume jobs get <id>         # input, timing, error, files
-opensume jobs status <id>      # one status read
+opensume jobs get <id>              # input, timing, error, files
+opensume jobs status <id>           # one status read
 opensume jobs wait <id> [-o dir/]   # wait for it, then save its files
-opensume jobs events <id>      # the job's timeline, including why it failed
-opensume jobs cancel <id>      # only before generation starts; refunded
+opensume jobs events <id> [--follow]   # the job's timeline; --follow tails it until it ends
+opensume jobs cancel <id>           # only before generation starts; refunded
 ```
+
+`<id>` is a full job id or a unique start of one, such as the 8 characters in a file name (`gpt-image-2-0ae33f04.png` → `0ae33f04`).
 
 ### auth
 
@@ -226,6 +255,21 @@ printenv SUME_API_KEY | opensume auth login --with-key   # from stdin
 opensume auth status                                 # which key and host, and whether the key works
 opensume auth logout                                 # forget the saved key
 ```
+
+### doctor
+
+```console
+$ opensume doctor
+✓ CLI     opensume 0.2.0 (bun 1.4.2, darwin arm64, standalone)
+✓ Update  latest release
+✓ Config  ~/.config/opensume/config.json (mode 600)
+✓ API     https://api.dev.sume.com · ok · build 050f0b54a · public · 132ms
+✓ Models  62 models in the open catalog · 172ms
+✓ Key     sume_live_Xy12_ab3…9QzK (SUME_API_KEY) · accepted · 120ms
+✓ Media   media.sume.com reachable · 97ms
+```
+
+`doctor` exits non-zero when a check fails (3 for the key), and `--json` returns every check. It spends nothing.
 
 ## Prices and spending
 
@@ -277,7 +321,9 @@ Without `--json`, results go to stdout and everything else (progress, notes, err
 | `8` | Rate limit or concurrency cap; retry later |
 | `130` | Interrupted with Ctrl-C (the job keeps running) |
 
-**The whole command tree as JSON:** `opensume --help --json`. It is generated from the same definitions as `--help`, so it never drifts.
+**The whole command tree as JSON:** `opensume --help --json`. It is generated from the same definitions as `--help`, so it never drifts. `opensume schema <model> --json` gives a model's inputs the same way.
+
+**Events:** `run --logs --json` adds the job's events to the document; `opensume jobs events <id> --follow --json` prints one JSON event per line until the job ends.
 
 **Agent skill.** [`skills/opensume/SKILL.md`](skills/opensume/SKILL.md) teaches coding agents (Claude Code and others that read skills) to pick a model, check the price, cap the spend and handle long jobs. Copy it into your agent's skills folder:
 
@@ -330,7 +376,7 @@ opensume run  ──▶  POST /v1/{image,video}-router/generate   202 + job id, 
 | `Balance too low` (exit 7) | Top up at open.sume.com → Billing. The error shows the price and your balance. |
 | `concurrency_limit_reached` (exit 8) | Your workspace has as many jobs in flight as it may. Wait for one to finish. |
 | `Stopped waiting after …` (exit 6) | The job is still running. `opensume jobs wait <id>` collects it later; do not resubmit. |
-| Anything else | Re-run with `--verbose` and quote the request id (`req_…`) when you ask for help. |
+| Anything else | Run `opensume doctor`, then re-run with `--verbose` and quote the request id (`req_…`) when you ask for help. |
 
 ## Uninstall
 

@@ -1,12 +1,12 @@
-import type { Job, JobEvent } from "../api/types.ts";
+import type { Job } from "../api/types.ts";
 import type { Context } from "../context.ts";
 import type { CommandSpec } from "../lib/args.ts";
 import { ExitCode } from "../lib/errors.ts";
 import { formatAge, formatDuration } from "../lib/ui.ts";
-import { followJob, jobRow, timeoutFlag, WAIT_FLAGS } from "./shared.ts";
+import { eventLines, eventTail, followJob, jobRow, resolveJobId, timeoutFlag, WAIT_FLAGS } from "./shared.ts";
 
 const STATES = ["queued", "processing", "completed", "failed", "canceled"] as const;
-const jobArg = [{ name: "id", required: true, description: "The job id (job_…)" }] as const;
+const jobArg = [{ name: "id", required: true, description: "The job id (job_…), or a unique start of it" }] as const;
 
 const list: CommandSpec = {
   name: "list",
@@ -73,7 +73,7 @@ const get: CommandSpec = {
   args: jobArg,
   run: async (parsed, ctx) => {
     const { ui } = ctx;
-    const job = await ctx.client().getJob(parsed.args[0] as string, ctx.signal);
+    const job = await ctx.client().getJob(await resolveJobId(ctx, parsed.args[0] as string), ctx.signal);
     if (ctx.json) {
       ui.json(job);
       return ExitCode.Ok;
@@ -105,7 +105,7 @@ const status: CommandSpec = {
   args: jobArg,
   run: async (parsed, ctx) => {
     const { ui } = ctx;
-    const { data } = await ctx.client().getStatus(parsed.args[0] as string, ctx.signal);
+    const { data } = await ctx.client().getStatus(await resolveJobId(ctx, parsed.args[0] as string), ctx.signal);
     if (ctx.json) {
       ui.json(data);
       return ExitCode.Ok;
@@ -133,7 +133,7 @@ const wait: CommandSpec = {
   flags: WAIT_FLAGS,
   examples: ["opensume jobs wait job_7513b52d-3669-4ffe-b317-8b02000715eb -o ./out/"],
   run: async (parsed, ctx) => {
-    const id = parsed.args[0] as string;
+    const id = await resolveJobId(ctx, parsed.args[0] as string);
     const timeoutMs = timeoutFlag(parsed.flags as Record<string, unknown>);
     const job = await ctx.client().getJob(id, ctx.signal);
     return followJob(ctx, {
@@ -156,7 +156,7 @@ const cancel: CommandSpec = {
   args: jobArg,
   run: async (parsed, ctx) => {
     const { ui } = ctx;
-    const res = await ctx.client().cancelJob(parsed.args[0] as string, ctx.signal);
+    const res = await ctx.client().cancelJob(await resolveJobId(ctx, parsed.args[0] as string), ctx.signal);
     if (ctx.json) ui.json(res);
     else ui.success(`Canceled ${res.job_id}`);
     return ExitCode.Ok;
@@ -165,28 +165,45 @@ const cancel: CommandSpec = {
 
 const events: CommandSpec = {
   name: "events",
+  aliases: ["logs"],
   summary: "Show a job's lifecycle events, including why it failed",
+  description: "With --follow, keeps printing new events until the job ends, like tail -f.",
   args: jobArg,
-  flags: [{ name: "limit", short: "l", type: "number", placeholder: "<n>", description: "How many events" }],
+  flags: [
+    { name: "limit", short: "l", type: "number", placeholder: "<n>", description: "How many events" },
+    { name: "follow", short: "f", type: "boolean", description: "Keep printing new events until the job ends" },
+  ],
+  examples: ["opensume jobs events job_7513b52d", "opensume jobs logs 7513b52d --follow"],
   run: async (parsed, ctx) => {
     const { ui } = ctx;
-    const res = await ctx
-      .client()
-      .listEvents(parsed.args[0] as string, parsed.flags.limit as number | undefined, ctx.signal);
+    const id = await resolveJobId(ctx, parsed.args[0] as string);
+    if (parsed.flags.follow === true) {
+      ctx.jobId = id;
+      const tail = eventTail(ctx, id);
+      for (;;) {
+        const fresh = await tail.pull();
+        for (const event of fresh) {
+          if (ctx.json) ui.out(JSON.stringify(event));
+          else for (const line of eventLines(ctx, event, tail.firstAt)) ui.out(line);
+        }
+        const { data } = await ctx.client().getStatus(id, ctx.signal);
+        if (data.terminal) {
+          for (const event of await tail.pull()) {
+            if (ctx.json) ui.out(JSON.stringify(event));
+            else for (const line of eventLines(ctx, event, tail.firstAt)) ui.out(line);
+          }
+          return ExitCode.Ok;
+        }
+        await ctx.sleep(Math.min(Math.max((data.next_poll_after_seconds ?? 2) * 1000, 1000), 5000), ctx.signal);
+      }
+    }
+    const res = await ctx.client().listEvents(id, parsed.flags.limit as number | undefined, ctx.signal);
     if (ctx.json) {
       ui.json(res);
       return ExitCode.Ok;
     }
-    const { c } = ui;
     const first = res.events[0] ? Date.parse(res.events[0].created_at) : 0;
-    for (const event of res.events) {
-      const offset = first ? `+${formatDuration(Date.parse(event.created_at) - first)}` : "";
-      ui.out(
-        `${c.dim(offset.padStart(8))}  ${paintEvent(ctx, event)}${event.message ? `  ${c.dim(event.message)}` : ""}`,
-      );
-      const error = (event.data as { error?: { message?: string } } | undefined)?.error;
-      if (error?.message) ui.out(`${" ".repeat(10)}${c.red(error.message)}`);
-    }
+    for (const event of res.events) for (const line of eventLines(ctx, event, first)) ui.out(line);
     return ExitCode.Ok;
   },
 };
@@ -212,11 +229,4 @@ function paintState(ctx: Context, state: string): string {
   if (state === "failed") return c.red(state);
   if (state === "canceled") return c.yellow(state);
   return c.cyan(state);
-}
-
-function paintEvent(ctx: Context, event: JobEvent): string {
-  const { c } = ctx.ui;
-  if (event.status === "failed") return c.red(event.type);
-  if (event.status === "succeeded") return c.green(event.type);
-  return event.type;
 }

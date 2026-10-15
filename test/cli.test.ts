@@ -297,9 +297,30 @@ describe("jobs", () => {
   });
 
   it("answers 404 for a job that is not yours", async () => {
-    const res = await cli(["jobs", "status", "job_missing"]);
+    const res = await cli(["jobs", "status", "job_00000000-0000-0000-0000-000000000000"]);
     expect(res.code).toBe(4);
     expect(res.stderr).toContain("API job was not found.");
+  });
+
+  it("finds a job by the short id in a file name", async () => {
+    const submitted = await cli(["run", "gpt-image-2", "a cup", "--no-wait", "--json"]);
+    const id = submitted.json<{ job: { id: string } }>().job.id;
+    const short = id.slice(4, 12);
+    const res = await cli(["jobs", "status", short, "--json"]);
+    expect(res.code).toBe(0);
+    expect(res.json<{ job_id: string }>().job_id).toBe(id);
+    expect((await cli(["jobs", "get", "ffff0000"])).code).toBe(4);
+    expect((await cli(["jobs", "get", "not-a-job"])).code).toBe(2);
+  });
+
+  it("reports a job the provider refused at submit as a failed job", async () => {
+    api.refuseAtSubmit = true;
+    const res = await cli(["run", "gpt-image-2", "a cup", "--json"]);
+    api.refuseAtSubmit = false;
+    expect(res.code).toBe(5);
+    const out = res.json<{ job: { id: string; status: string }; error: { message: string } }>();
+    expect(out.job.status).toBe("failed");
+    expect(out.error.message).toBe('Application "imagen4" not found');
   });
 });
 
@@ -374,5 +395,100 @@ describe("auth", () => {
     const bad = await cli(["auth", "status"], { key: "sume_live_wrong_wrong_wrong_wrong_wrong" });
     expect(bad.code).toBe(3);
     expect(bad.stdout).toContain("does not accept this key");
+  });
+});
+
+describe("fal-level features", () => {
+  it("shows a model's inputs with types and flags", async () => {
+    const res = await cli(["schema", "gpt-image-2"], { key: null });
+    expect(res.code).toBe(0);
+    expect(res.stdout).toContain("gpt-image-2 — inputs for POST /v1/image-router/generate");
+    expect(res.stdout).toMatch(/image_urls\s+url\[\] \(1–16\)\s+-i, --image/u);
+    const json = (await cli(["schema", "veed-lipsync", "--json"], { key: null })).json<{
+      router: string;
+      fields: Record<string, { flag: string }>;
+    }>();
+    expect(json.router).toBe("video");
+    expect(json.fields.audio_url?.flag).toBe("--audio");
+    expect((await cli(["run", "gpt-image-2", "--help"], { key: null })).stdout).toContain(
+      "inputs for POST /v1/image-router/generate",
+    );
+  });
+
+  it("types --set values by the field, and warns about fields the API does not have", async () => {
+    const res = await cli([
+      "run",
+      "gpt-image-2",
+      "a cup",
+      "--set",
+      "quality=1984",
+      "--set",
+      "num_images=2",
+      "--set",
+      "qualty=low",
+      "--dry-run",
+      "--json",
+    ]);
+    expect(res.code).toBe(0);
+    const out = res.json<{ body: Record<string, unknown>; warnings: string[] }>();
+    expect(out.body.quality).toBe("1984");
+    expect(out.body.num_images).toBe(2);
+    expect(out.warnings[0]).toContain("qualty is not a field of POST /v1/image-router/generate; did you mean quality?");
+    expect((await cli(["run", "gpt-image-2", "a cup", "--set", "num_images=two", "--dry-run"])).code).toBe(2);
+  });
+
+  it("streams job events with --logs, and adds them to --json", async () => {
+    const text = await cli(["run", "gpt-image-2", "a cup", "--logs", "--no-download"]);
+    expect(text.code).toBe(0);
+    expect(text.stderr).toContain("job.created");
+    const json = await cli(["run", "gpt-image-2", "a cup", "--logs", "--no-download", "--json"]);
+    expect(json.json<{ events: { type: string }[] }>().events.map((e) => e.type)).toContain("job.completed");
+  });
+
+  it("follows a job's events until it ends, as JSON lines with --json", async () => {
+    const id = (await cli(["run", "gpt-image-2", "a cup", "--no-wait", "--json"])).json<{ job: { id: string } }>().job
+      .id;
+    const res = await cli(["jobs", "logs", id, "--follow", "--json"]);
+    expect(res.code).toBe(0);
+    const lines = res.stdout
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as { type: string });
+    expect(lines.map((l) => l.type)).toEqual(["job.created", "job.completed"]);
+  });
+
+  it("copies a URL into storage", async () => {
+    const res = await cli(["upload", `${api.url}/media/source.png`, "--json"]);
+    expect(res.code).toBe(0);
+    const [file] = res.json<{ url: string; content_type: string }[]>();
+    expect(file?.content_type).toBe("image/png");
+    expect(file?.url).toMatch(/\/media\/asset_\w+\.png$/u);
+  });
+
+  it("names files by an -o template", async () => {
+    api.nextArtifacts = 2;
+    const cwd = tempDir();
+    const res = await cli(["run", "gpt-image-2", "a cup", "-o", "shots/{model}-{index}.{ext}", "--json"], { cwd });
+    expect(res.code).toBe(0);
+    expect(res.json<{ artifacts: { path: string }[] }>().artifacts.map((a) => a.path)).toEqual([
+      join(cwd, "shots", "gpt-image-2-1.png"),
+      join(cwd, "shots", "gpt-image-2-2.png"),
+    ]);
+    expect((await cli(["run", "gpt-image-2", "a cup", "-o", "{nope}.png"])).code).toBe(2);
+  });
+
+  it("checks the install with doctor", async () => {
+    const ok = await cli(["doctor", "--json"]);
+    expect(ok.code).toBe(0);
+    expect(ok.json<{ checks: { name: string }[] }>().checks.map((c) => c.name)).toEqual([
+      "CLI",
+      "Update",
+      "Config",
+      "API",
+      "Models",
+      "Key",
+      "Media",
+    ]);
+    expect((await cli(["doctor"], { key: null })).code).toBe(3);
   });
 });

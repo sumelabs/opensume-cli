@@ -2,10 +2,12 @@ import { ApiError } from "./api/errors.ts";
 import { auth } from "./commands/auth.ts";
 import { complete } from "./commands/complete.ts";
 import { completionCommand } from "./commands/completion.ts";
+import { doctor } from "./commands/doctor.ts";
 import { estimate } from "./commands/estimate.ts";
 import { jobs } from "./commands/jobs.ts";
 import { models } from "./commands/models.ts";
 import { run } from "./commands/run.ts";
+import { renderInputs, schema, vendoredRouter } from "./commands/schema.ts";
 import { update } from "./commands/update.ts";
 import { upload } from "./commands/upload.ts";
 import { version, versionInfo } from "./commands/version.ts";
@@ -53,7 +55,21 @@ export const root: CommandSpec = {
     "Run any open.sume.com model, wait for the job, and get the file. Prices are in dollars and shown before you spend. " +
     "Every command takes --json for scripts and agents.",
   flags: GLOBAL_FLAGS,
-  commands: [run, estimate, upload, models, jobs, auth, completionCommand(() => root), update, version, help, complete],
+  commands: [
+    run,
+    estimate,
+    upload,
+    models,
+    schema,
+    jobs,
+    auth,
+    doctor,
+    completionCommand(() => root),
+    update,
+    version,
+    help,
+    complete,
+  ],
 };
 
 export interface MainOptions {
@@ -116,6 +132,14 @@ export async function main(options: MainOptions): Promise<number> {
       const chain = parsed.command === help ? chainFor(parsed.args) : chainFor(parsed.path);
       if (json) ui.json(manifest(chain[chain.length - 1] === root ? undefined : chain));
       else ui.out(renderHelp(chain, ui.c, ui.width).trimEnd());
+      // `run <model> --help` also shows what that model takes, like `opensume schema <model>`.
+      const modelId = parsed.command !== help ? parsed.args[0] : undefined;
+      const router =
+        modelId && (parsed.command === run || parsed.command === estimate) ? vendoredRouter(modelId) : undefined;
+      if (!json && modelId && router) {
+        ui.out("");
+        for (const line of renderInputs(modelId, router, ui.c, ui.width)) ui.out(line);
+      }
       return ExitCode.Ok;
     }
     if (!parsed.command.run) {

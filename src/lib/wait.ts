@@ -13,6 +13,8 @@ export interface WaitOptions {
   onRetry?: (error: Error) => void;
   /** The delay chosen before the next read, and the API's own hint. */
   onDelay?: (delaySeconds: number, hintSeconds: number | null) => void;
+  /** Awaited after every status read, before waiting again (`--logs` reads events here). */
+  onPoll?: (status: StatusResponse) => Promise<void>;
   /** Seconds before the first read, usually the submit's `next_poll_after_seconds`. */
   firstDelaySeconds?: number | null | undefined;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -69,6 +71,7 @@ export async function waitForJob(client: SumeClient, jobId: string, options: Wai
     }
     options.onStatus?.(status);
     if (status.terminal) return status;
+    await options.onPoll?.(status);
     if (now() >= deadline) throw timeoutError(jobId, options.timeoutMs);
     const hint = status.next_poll_after_seconds ?? pollAfter ?? status.recommended_poll_interval_seconds ?? null;
     const delayS = clampDelay(hint ?? DEFAULT_DELAY_S, maxDelaySeconds(now() - started));

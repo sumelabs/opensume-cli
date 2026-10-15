@@ -5,10 +5,20 @@ import type { Estimate } from "../api/types.ts";
 import type { Context } from "../context.ts";
 import type { CommandSpec, Parsed } from "../lib/args.ts";
 import { buildBody, type InputFlags, localMediaPaths, replaceMedia, routerFor } from "../lib/body.ts";
+import { checkTemplate } from "../lib/download.ts";
 import { CliError, ExitCode, UsageError } from "../lib/errors.ts";
+import { unknownFields } from "../lib/schema.ts";
 import { formatBytes, formatUsd } from "../lib/ui.ts";
 import { uploadFile } from "../lib/upload.ts";
-import { followJob, INPUT_FLAGS, pricingNotes, resolveModel, timeoutFlag, WAIT_FLAGS } from "./shared.ts";
+import {
+  followJob,
+  INPUT_FLAGS,
+  pricingNotes,
+  reportJobFailure,
+  resolveModel,
+  timeoutFlag,
+  WAIT_FLAGS,
+} from "./shared.ts";
 
 export const run: CommandSpec = {
   name: "run",
@@ -80,6 +90,7 @@ async function runCommand(parsed: Parsed, ctx: Context): Promise<number> {
   const prompt = positionalPrompt ?? flags.prompt;
   // Every local check happens before anything is uploaded or paid for.
   const timeoutMs = timeoutFlag(flags);
+  checkTemplate(flags.output as string | undefined);
   const startedAt = Date.now();
   const client = ctx.client();
 
@@ -93,6 +104,7 @@ async function runCommand(parsed: Parsed, ctx: Context): Promise<number> {
     warnings.push(note);
     if (!json) ui.warn(note);
   };
+  for (const note of unknownFields(routerFor(model), body)) warn(note);
 
   // The estimate prices the request as sent; uploaded files only change
   // their URLs, so placeholders stand in for them until they exist.
@@ -114,7 +126,7 @@ async function runCommand(parsed: Parsed, ctx: Context): Promise<number> {
   if (flags["dry-run"] === true) {
     const { estimate } = await estimating;
     ui.stopSpinner();
-    const notes = estimate ? pricingNotes(body, estimate) : [];
+    const notes = [...warnings, ...(estimate ? pricingNotes(body, estimate) : [])];
     if (json) {
       ui.json({
         model: model.id,
@@ -129,7 +141,7 @@ async function runCommand(parsed: Parsed, ctx: Context): Promise<number> {
       ui.out(JSON.stringify({ ...body, model: model.id }, null, 2));
       if (localFiles.length) ui.info(ui.c.dim(`Would upload: ${localFiles.join(", ")}`));
       ui.info(estimate ? `Price: ${priceLine(estimate)}` : "Price: unavailable");
-      for (const note of notes) ui.warn(note);
+      for (const note of notes.slice(warnings.length)) ui.warn(note);
     }
     return ExitCode.Ok;
   }
@@ -162,7 +174,25 @@ async function runCommand(parsed: Parsed, ctx: Context): Promise<number> {
   // so a retry adopts the job instead of paying for a second one.
   ctx.idempotencyKey = idempotencyKey;
   ui.spin(`Submitting to ${model.id}`);
-  const submitted = await client.generate(routerFor(model), { ...body, model: model.id }, idempotencyKey, ctx.signal);
+  let submitted: Awaited<ReturnType<typeof client.generate>>;
+  try {
+    submitted = await client.generate(routerFor(model), { ...body, model: model.id }, idempotencyKey, ctx.signal);
+  } catch (error) {
+    // The provider can refuse a job the moment it is submitted: the API then
+    // answers with the job already failed. That is a failed job (exit 5), not
+    // a broken request, and it is refunded.
+    const failed = error instanceof ApiError ? error.failedJob() : undefined;
+    if (!failed) throw error;
+    ui.stopSpinner();
+    ctx.jobId = failed.id;
+    return reportJobFailure(ctx, {
+      jobId: failed.id,
+      model: failed.model ?? model.id,
+      state: failed.status,
+      error: failed.error ?? { message: error instanceof Error ? error.message : String(error) },
+      extra: { idempotency_key: idempotencyKey },
+    });
+  }
   const job = submitted.data.job;
   ctx.jobId = job.id;
   const { estimate } = await estimating;

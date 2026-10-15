@@ -1,6 +1,6 @@
 {
   "name": "opensume",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Generate images and video from your terminal with the Sume Open API.",
   "keywords": [
     "sume",
@@ -46,7 +46,9 @@
     "prepare": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "sync-schema": "node scripts/sync-schema.mjs",
+    "schema:check": "node scripts/sync-schema.mjs --check"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

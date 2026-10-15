@@ -20,6 +20,8 @@ export interface Context {
   jobId: string | undefined;
   /** The Idempotency-Key of a submit in flight, for the same reason. */
   idempotencyKey: string | undefined;
+  /** For calls outside the API (GitHub, the media host), so tests can stand in for them. */
+  fetch: typeof globalThis.fetch;
   client(): SumeClient;
 }
 
@@ -51,6 +53,7 @@ export function createContext(options: {
     sleep,
     jobId: undefined,
     idempotencyKey: undefined,
+    fetch: options.fetch ?? globalThis.fetch,
     client() {
       client ??= new SumeClient({
         baseUrl: options.settings.baseUrl,

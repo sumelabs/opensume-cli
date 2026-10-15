@@ -81,3 +81,39 @@ describe("extensions", () => {
     expect(shortJobId("odd")).toBe("odd");
   });
 });
+
+describe("selectArtifacts", () => {
+  it("keeps final outputs and drops posters, labelled or not", async () => {
+    const { selectArtifacts } = await import("../src/commands/shared.ts");
+    const video = { id: "v", type: "video", url: "https://x/v.mp4", content_type: "video/mp4" } as const;
+    const labelled = {
+      id: "p",
+      type: "image",
+      stage: "poster",
+      url: "https://x/p.jpg",
+      content_type: "image/jpeg",
+    } as const;
+    const bare = { id: "b", type: "image", url: "https://x/b.jpg", content_type: "image/jpeg" } as const;
+    expect(selectArtifacts([video, labelled], false).map((a) => a.id)).toEqual(["v"]);
+    expect(selectArtifacts([video, bare], false).map((a) => a.id)).toEqual(["v"]);
+    expect(selectArtifacts([video, bare], true).map((a) => a.id)).toEqual(["v", "b"]);
+    expect(selectArtifacts([bare, { ...bare, id: "c" }], false).map((a) => a.id)).toEqual(["b", "c"]);
+  });
+});
+
+describe("templates", () => {
+  it("names files from tokens, numbering and adding extensions when the template does not", async () => {
+    const { checkTemplate } = await import("../src/lib/download.ts");
+    const dir = cwd();
+    const two = [artifact("image/png"), artifact("image/webp")];
+    expect(
+      await planPaths(two, { output: "out/{model}-{job}-{index}.{ext}", model: "gpt-image-2", jobId, cwd: dir }),
+    ).toEqual([join(dir, "out", "gpt-image-2-7513b52d-1.png"), join(dir, "out", "gpt-image-2-7513b52d-2.webp")]);
+    expect(await planPaths(two, { output: "{job_id}", model: "m", jobId, cwd: dir })).toEqual([
+      join(dir, `${jobId}.png`),
+      join(dir, `${jobId}-2.webp`),
+    ]);
+    expect(() => checkTemplate("out/{nope}.{ext}")).toThrow(/unknown token \{nope\}/u);
+    expect(() => checkTemplate("plain.png")).not.toThrow();
+  });
+});
