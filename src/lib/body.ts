@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import type { Router } from "../api/client.ts";
 import type { CatalogModel } from "../api/types.ts";
 import { CliError, ExitCode, UsageError } from "./errors.ts";
@@ -69,9 +70,11 @@ export async function buildBody(
   model: CatalogModel,
   flags: InputFlags,
   stdin: () => Promise<string> = readStdin,
+  cwd = process.cwd(),
 ): Promise<Record<string, unknown>> {
   const router = routerFor(model);
-  const body: Record<string, unknown> = flags.input ? await readInputJson(flags.input, stdin) : {};
+  const input = flags.input && flags.input !== "-" ? resolve(cwd, flags.input) : flags.input;
+  const body: Record<string, unknown> = input ? await readInputJson(input, stdin, flags.input as string) : {};
   delete body.model;
 
   const set = (key: string, value: unknown) => {
@@ -199,18 +202,36 @@ export function parseValue(raw: string): unknown {
   return raw;
 }
 
-async function readInputJson(source: string, stdin: () => Promise<string>): Promise<Record<string, unknown>> {
+async function readInputJson(
+  path: string,
+  stdin: () => Promise<string>,
+  source = path,
+): Promise<Record<string, unknown>> {
   let text: string;
   try {
-    text = source === "-" ? await stdin() : await readFile(source, "utf8");
+    text = path === "-" ? await stdin() : await readFile(path, "utf8");
   } catch (cause) {
-    throw new CliError(`Cannot read --input ${source}.`, { exitCode: ExitCode.Usage, code: "input_unreadable", cause });
+    if (cause instanceof CliError) throw cause;
+    const code = (cause as NodeJS.ErrnoException).code;
+    const why =
+      code === "ENOENT"
+        ? "no such file"
+        : code === "EISDIR"
+          ? "it is a folder"
+          : code === "EACCES"
+            ? "permission denied"
+            : (code ?? "error");
+    throw new CliError(`Cannot read --input ${source}: ${why}.`, {
+      exitCode: ExitCode.Usage,
+      code: "input_unreadable",
+      cause,
+    });
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch (cause) {
-    throw new CliError(`--input ${source} is not valid JSON.`, {
+    throw new CliError(`--input ${source} is not valid JSON: ${(cause as Error).message}.`, {
       exitCode: ExitCode.Usage,
       code: "input_invalid",
       cause,
@@ -232,15 +253,19 @@ export async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-/** Every local file path in the body's media fields, in order, deduplicated. */
-export function localMediaPaths(body: Record<string, unknown>): string[] {
-  const paths = new Set<string>();
+/** Every string in the body's media fields: URLs and local paths alike. */
+export function mediaValues(body: Record<string, unknown>): string[] {
+  const values: string[] = [];
   for (const field of MEDIA_FIELDS) {
     const value = body[field];
-    const values = Array.isArray(value) ? value : [value];
-    for (const item of values) if (typeof item === "string" && item && !isHttpUrl(item)) paths.add(item);
+    for (const item of Array.isArray(value) ? value : [value]) if (typeof item === "string" && item) values.push(item);
   }
-  return [...paths];
+  return values;
+}
+
+/** Every local file path in the body's media fields, in order, deduplicated. */
+export function localMediaPaths(body: Record<string, unknown>): string[] {
+  return [...new Set(mediaValues(body).filter((item) => !isHttpUrl(item)))];
 }
 
 /** Swap local paths for the URLs they were uploaded to. */

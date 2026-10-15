@@ -2,6 +2,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import type { CommandSpec } from "../lib/args.ts";
 import { DEFAULT_BASE_URL, DOCS_URL, INSTALL, KEYS_URL, keySourceLabel, WRONG_BASE_URL } from "../lib/config.ts";
+import { localWriteError } from "../lib/download.ts";
 import { CliError, ExitCode, UsageError } from "../lib/errors.ts";
 import { VERSION } from "../version.ts";
 import { type BriefModel, briefLimits, briefModels, briefPrice } from "./models.ts";
@@ -59,7 +60,9 @@ export function agentMarkdown(): string {
     "**When it fails**",
     "",
     "Exit codes: 1 network or server (retry), 2 bad flags, 3 key (follow `error.hint`), 4 input refused (fix what `error.message` says), " +
-      "5 job failed (refunded; `opensume jobs get <job>` says why), 6 timed out, 7 balance or cap, 8 rate limit. " +
+      "5 job failed (refunded; `opensume jobs get <job>` says why), 6 timed out, 7 balance or cap, 8 rate limit, " +
+      "130 stopped by Ctrl-C or SIGTERM (the job keeps running; `jobs wait` it). " +
+      "Exit 1 after a finished job means a file was not saved: run the command the error prints; it fetches only the missing files. " +
       'With `--json`, errors are `{"error": {"code", "message", "hint", "request_id"}}`. ' +
       `Every command and flag: \`opensume --help --json\`. Docs: ${DOCS_URL}`,
   ].join("\n");
@@ -275,7 +278,11 @@ async function readIfThere(path: string): Promise<string | undefined> {
     return await readFile(path, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
+    const code = (error as NodeJS.ErrnoException).code;
+    throw new CliError(
+      `Cannot read ${path}: ${code === "EISDIR" ? "it is a folder" : code === "EACCES" ? "permission denied" : (code ?? "error")}.`,
+      { exitCode: ExitCode.Usage, code: "file_unreadable", cause: error },
+    );
   }
 }
 
@@ -283,19 +290,26 @@ async function readIfThere(path: string): Promise<string | undefined> {
 async function writeWholeFile(path: string, content: string): Promise<{ path: string; action: Action }> {
   const existing = await readIfThere(path);
   if (existing === content) return { path, action: "unchanged" };
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, content, "utf8");
+  await save(path, content);
   return { path, action: existing === undefined ? "created" : "updated" };
+}
+
+async function save(path: string, content: string): Promise<void> {
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, content, "utf8");
+  } catch (error) {
+    throw (
+      localWriteError(path, error, "Check the folder's permissions, or write to another file with --write.") ?? error
+    );
+  }
 }
 
 /** A file the project owns (AGENTS.md): replace only the block between the markers, or append one. */
 async function writeBlockFile(path: string): Promise<{ path: string; action: Action }> {
   const existing = await readIfThere(path);
   const { next, action } = mergeBlock(existing, `${BEGIN}\n${agentMarkdown()}\n${END}`, path);
-  if (action !== "unchanged") {
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, next, "utf8");
-  }
+  if (action !== "unchanged") await save(path, next);
   return { path, action };
 }
 

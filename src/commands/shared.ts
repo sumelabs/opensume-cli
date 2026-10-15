@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
+import { stat } from "node:fs/promises";
 import { relative } from "node:path";
 import { ApiError } from "../api/errors.ts";
 import type { Artifact, CatalogModel, Estimate, Job, JobEvent, ResultResponse, StatusResponse } from "../api/types.ts";
 import type { Context } from "../context.ts";
 import { closest, type FlagSpec } from "../lib/args.ts";
-import { downloadTo, planPaths, type SavedFile } from "../lib/download.ts";
+import { downloadTo, type PlannedPath, planPaths, type SavedFile } from "../lib/download.ts";
 import { CliError, ExitCode, UsageError } from "../lib/errors.ts";
 import { formatBytes, formatDuration, formatUsd } from "../lib/ui.ts";
 import { parseDuration, waitForJob } from "../lib/wait.ts";
@@ -100,6 +101,8 @@ export const INPUT_FLAGS: readonly FlagSpec[] = [
     name: "duration",
     short: "d",
     type: "number",
+    min: 1,
+    integer: true,
     placeholder: "<seconds>",
     section: "Settings",
     description: "Length in whole seconds (video, lip-sync, captions)",
@@ -116,6 +119,8 @@ export const INPUT_FLAGS: readonly FlagSpec[] = [
     name: "num-images",
     short: "n",
     type: "number",
+    min: 1,
+    integer: true,
     placeholder: "<n>",
     section: "Settings",
     description: "How many images, 1–4",
@@ -305,7 +310,16 @@ export async function followJob(ctx: Context, options: FollowOptions): Promise<n
     sleep: ctx.sleep,
     onPoll: printEvents,
     onStatus: (s) => ui.spin(progressLine(ctx, label + price, s, options.startedAt)),
-    onRetry: (error) => ui.debug(`status read failed, retrying: ${error.message}`),
+    onRetry: (error, consecutive) => {
+      ui.debug(`status read failed, retrying: ${error.message}`);
+      // A blip is normal and stays quiet; an outage is worth one line.
+      if (consecutive === LOST_CONTACT_AFTER && !json) {
+        ui.warn(`Lost contact with the API (${error.message}). Still trying; the job keeps running on Sume.`);
+      }
+    },
+    onRecover: (failures) => {
+      if (failures >= LOST_CONTACT_AFTER && !json) ui.info(ui.c.dim("Back in contact with the API."));
+    },
     onDelay: (delay, hint) => ui.debug(`next status read in ${delay}s${hint !== null ? ` (API hint ${hint}s)` : ""}`),
   });
   ui.stopSpinner();
@@ -328,34 +342,58 @@ export async function followJob(ctx: Context, options: FollowOptions): Promise<n
   const wanted = selectArtifacts(artifacts, flags["all-files"] === true);
 
   const files: SavedFile[] = [];
+  // One file that cannot be saved does not stop the others: each one saved is
+  // paid for, and the report says exactly which are missing.
+  const failed: { artifact: Artifact; path: string; error: CliError }[] = [];
   if (download && wanted.length > 0) {
-    const paths = await planPaths(wanted, {
+    const planned = await planPaths(wanted, {
       output: flags.output as string | undefined,
       model: options.model,
       jobId: options.jobId,
       cwd: ctx.cwd,
     });
     for (const [i, artifact] of wanted.entries()) {
-      const path = paths[i] as string;
+      const { path, existing } = planned[i] as PlannedPath;
+      const kept = existing ? await stat(path).catch(() => undefined) : undefined;
+      if (kept) {
+        files.push({ path, bytes: kept.size, artifact, existing: true });
+        continue;
+      }
       ui.spin(`Saving ${relative(ctx.cwd, path) || path}`);
-      const bytes = await downloadTo(artifact.url, path, {
-        userAgent: ctx.userAgent,
-        signal: ctx.signal,
-        sleep: ctx.sleep,
-      });
-      files.push({ path, bytes, artifact });
+      try {
+        const bytes = await downloadTo(artifact.url, path, {
+          userAgent: ctx.userAgent,
+          signal: ctx.signal,
+          sleep: ctx.sleep,
+          expect: { bytes: artifact.size_bytes, sha256: artifact.checksum_sha256, kind: artifact.type },
+        });
+        files.push({ path, bytes, artifact });
+      } catch (error) {
+        if (ctx.signal.aborted || !(error instanceof CliError)) throw error;
+        failed.push({ artifact, path, error });
+      }
     }
     ui.stopSpinner();
   }
+  const again = `opensume jobs wait ${options.jobId}${flags.output ? ` -o ${shellQuote(String(flags.output))}` : ""}`;
+  const partial = failed.length > 0 && {
+    code: (failed[0] as { error: CliError }).error.code,
+    message: `Saved ${files.length} of ${wanted.length} files. ${failed.map((f) => f.error.message).join(" ")}`,
+    hint: `Get the missing ${failed.length === 1 ? "file" : "files"} with: ${again}`,
+  };
 
   if (json) {
     ui.json({
+      ...(partial ? { error: { ...partial, job_id: options.jobId } } : {}),
       job: { id: options.jobId, model: options.model ?? null, status: status.sume_status },
       ...(options.usd ? { usd: options.usd } : {}),
       elapsed_ms: elapsedMs,
       artifacts: artifacts.map((a) => {
         const file = files.find((f) => f.artifact === a);
-        return file ? { ...a, path: file.path, bytes: file.bytes } : a;
+        if (file)
+          return { ...a, path: file.path, bytes: file.bytes, ...(file.existing ? { already_saved: true } : {}) };
+        const miss = failed.find((f) => f.artifact === a);
+        return miss ? { ...a, path: null, error: miss.error.message } : a;
       }),
       ...options.extra,
       ...logs,
@@ -365,7 +403,8 @@ export async function followJob(ctx: Context, options: FollowOptions): Promise<n
     if (artifacts.length === 0) ui.warn("The job completed without files.");
     if (download) {
       for (const file of files) {
-        ui.info(`  ${ctx.ui.c.bold(display(ctx, file.path))}  ${ctx.ui.c.dim(describeFile(file))}`);
+        const note = file.existing ? "already saved" : describeFile(file);
+        ui.info(`  ${ctx.ui.c.bold(display(ctx, file.path))}  ${ctx.ui.c.dim(note)}`);
       }
       // stdout carries the paths alone, for pipes: `opensume run … | xargs open`.
       if (!ui.options.stdout.isTTY || ui.options.quiet) for (const file of files) ui.out(file.path);
@@ -381,8 +420,17 @@ export async function followJob(ctx: Context, options: FollowOptions): Promise<n
       );
     }
   }
+  if (partial && !json) ui.error(partial.message, partial.hint);
   if (flags.open === true && files[0]) openFile(files[0].path);
-  return ExitCode.Ok;
+  return partial ? ExitCode.Error : ExitCode.Ok;
+}
+
+/** How many failed status reads in a row (each already retried) before the wait says it lost contact. */
+const LOST_CONTACT_AFTER = 3;
+
+/** Quote a path for the shell when it needs it, for commands printed as hints. */
+function shellQuote(value: string): string {
+  return /^[\w@%+=:,./-]+$/u.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 /**

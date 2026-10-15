@@ -17,6 +17,10 @@ export interface FlagSpec {
   readonly hidden?: boolean;
   /** Heading the flag is listed under in help. */
   readonly section?: string;
+  /** Number flags: the smallest and largest value allowed, and whether it must be whole. */
+  readonly min?: number;
+  readonly max?: number;
+  readonly integer?: boolean;
 }
 
 export interface ArgSpec {
@@ -139,6 +143,9 @@ export function parse(root: CommandSpec, argv: readonly string[]): Parsed {
         raw = next;
         i++;
       }
+      // An empty value is never meant: it is usually a shell variable that is not set
+      // (`--image "$IMG"`), and dropping it would run a different, paid request.
+      if (raw.trim() === "") throw emptyValue(`--${spec.name}`);
       value = spec.type === "number" ? toNumber(spec, raw) : raw;
       if (spec.choices && !spec.choices.includes(String(value))) {
         throw new UsageError(
@@ -159,6 +166,10 @@ export function parse(root: CommandSpec, argv: readonly string[]): Parsed {
   const command = leaf();
   checkArgs(command, args, path, flags.help === true);
   return { command, path, args, flags };
+}
+
+function emptyValue(what: string): UsageError {
+  return new UsageError(`${what} is empty.`, "If it comes from a shell variable, that variable is not set.");
 }
 
 /** Unknown subcommands are errors even with --help; missing arguments are not. */
@@ -182,6 +193,11 @@ function checkArgs(command: CommandSpec, args: string[], path: string[], help: b
     const missing = specs[args.length] as ArgSpec;
     throw new UsageError(`Missing <${missing.name}>.`, `Run \`opensume ${[...path, "--help"].join(" ")}\`.`);
   }
+  for (const [i, arg] of args.entries()) {
+    if (arg.trim() !== "") continue;
+    const spec = specs[Math.min(i, specs.length - 1)];
+    throw emptyValue(spec ? `<${spec.name}>` : `Argument ${i + 1}`);
+  }
   if (!variadic && args.length > specs.length) {
     const extra = args[specs.length] as string;
     throw new UsageError(
@@ -197,6 +213,19 @@ function toNumber(spec: FlagSpec, raw: string): number {
   const value = Number(raw);
   if (raw.trim() === "" || !Number.isFinite(value)) {
     throw new UsageError(`--${spec.name} must be a number (got "${raw}").`);
+  }
+  if (spec.integer && !Number.isInteger(value)) {
+    throw new UsageError(`--${spec.name} must be a whole number (got "${raw}").`);
+  }
+  const { min, max } = spec;
+  if ((min !== undefined && value < min) || (max !== undefined && value > max)) {
+    const range =
+      min !== undefined && max !== undefined
+        ? `from ${min} to ${max}`
+        : min !== undefined
+          ? `${min} or more`
+          : `${max} or less`;
+    throw new UsageError(`--${spec.name} must be ${range} (got ${raw}).`);
   }
   return value;
 }

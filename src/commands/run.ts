@@ -4,12 +4,13 @@ import { ApiError } from "../api/errors.ts";
 import type { Estimate } from "../api/types.ts";
 import type { Context } from "../context.ts";
 import type { CommandSpec, Parsed } from "../lib/args.ts";
-import { buildBody, type InputFlags, localMediaPaths, replaceMedia, routerFor } from "../lib/body.ts";
-import { checkTemplate } from "../lib/download.ts";
+import { buildBody, type InputFlags, localMediaPaths, mediaValues, replaceMedia, routerFor } from "../lib/body.ts";
+import { checkTemplate, checkWritable } from "../lib/download.ts";
 import { CliError, ExitCode, UsageError } from "../lib/errors.ts";
+import { isHttpUrl } from "../lib/media.ts";
 import { unknownFields } from "../lib/schema.ts";
 import { formatBytes, formatUsd } from "../lib/ui.ts";
-import { uploadFile } from "../lib/upload.ts";
+import { checkUploadable, uploadFile } from "../lib/upload.ts";
 import {
   followJob,
   INPUT_FLAGS,
@@ -45,6 +46,7 @@ export const run: CommandSpec = {
     {
       name: "max-usd",
       type: "number",
+      min: 0,
       placeholder: "<dollars>",
       section: "Submit",
       description: "Refuse to submit if the price is above this (default: OPENSUME_MAX_USD)",
@@ -92,13 +94,24 @@ async function runCommand(parsed: Parsed, ctx: Context): Promise<number> {
   // Every local check happens before anything is uploaded or paid for.
   const timeoutMs = timeoutFlag(flags);
   checkTemplate(flags.output as string | undefined);
+  checkSubmitFlags(flags);
+  const dryRun = flags["dry-run"] === true;
+  if (!dryRun && !ctx.settings.apiKey) ctx.client().requireKey();
+  if (!dryRun && flags["no-wait"] !== true && flags["no-download"] !== true) {
+    await checkWritable(flags.output as string | undefined, ctx.cwd).catch((error: UsageError) => {
+      throw new UsageError(error.message, `${error.hint} Nothing was submitted.`);
+    });
+  }
   const startedAt = Date.now();
   const client = ctx.client();
 
   ui.spin(`Looking up ${modelId}`);
   const model = await resolveModel(ctx, modelId);
-  const body = await buildBody(model, { ...flags, prompt });
+  const body = await buildBody(model, { ...flags, prompt }, undefined, ctx.cwd);
+  checkMediaUrls(body);
   const localFiles = localMediaPaths(body);
+  // A missing or unreadable file is found now, before pricing or paying.
+  for (const path of localFiles) await checkUploadable(resolve(ctx.cwd, path));
   const cap = spendCap(flags["max-usd"] as number | undefined, ctx.env);
   const maxUsd = cap?.usd;
   const warnings: string[] = [];
@@ -170,7 +183,7 @@ async function runCommand(parsed: Parsed, ctx: Context): Promise<number> {
     const urls = new Map<string, string>();
     for (const path of localFiles) {
       ui.spin(`Uploading ${basename(path)}`);
-      const uploaded = await uploadFile(client, resolve(ctx.cwd, path), { signal: ctx.signal });
+      const uploaded = await uploadFile(client, resolve(ctx.cwd, path), { signal: ctx.signal, sleep: ctx.sleep });
       urls.set(path, uploaded.url);
       ui.info(`${ui.c.dim("↑")} ${basename(path)} ${ui.c.dim(`${formatBytes(uploaded.sizeBytes)} uploaded`)}`);
     }
@@ -234,6 +247,49 @@ async function runCommand(parsed: Parsed, ctx: Context): Promise<number> {
       ...(warnings.length ? { warnings } : {}),
     },
   });
+}
+
+/**
+ * What the API would refuse anyway, refused here with the rule spelled out:
+ * the Idempotency-Key's charset and length, and a public https webhook.
+ */
+function checkSubmitFlags(flags: Record<string, unknown>): void {
+  const key = flags["idempotency-key"] as string | undefined;
+  if (key !== undefined && !/^[\x20-\x7e]{1,255}$/u.test(key)) {
+    throw new UsageError(
+      "--idempotency-key must be 1 to 255 printable ASCII characters.",
+      "Letters, digits and punctuation work; line breaks and non-ASCII do not.",
+    );
+  }
+  const webhook = flags.webhook as string | undefined;
+  if (webhook !== undefined) {
+    let url: URL | undefined;
+    try {
+      url = new URL(webhook);
+    } catch {
+      url = undefined;
+    }
+    if (url?.protocol !== "https:") {
+      throw new UsageError(
+        `--webhook must be a public https URL (got "${webhook}").`,
+        "The API refuses http, localhost and private-network addresses.",
+      );
+    }
+  }
+}
+
+/** A media value that starts like a URL must be one: `https://` alone is a typo, not a file name. */
+function checkMediaUrls(body: Record<string, unknown>): void {
+  for (const value of mediaValues(body)) {
+    if (!isHttpUrl(value)) continue;
+    let ok = false;
+    try {
+      ok = new URL(value).hostname !== "";
+    } catch {
+      ok = false;
+    }
+    if (!ok) throw new UsageError(`"${value}" is not a valid URL.`, "Pass a public https URL or a local file.");
+  }
 }
 
 /**

@@ -287,7 +287,7 @@ opensume auth logout                                 # forget the saved key
 
 ```console
 $ opensume doctor
-✓ CLI     opensume 0.4.1 (bun 1.4.2, darwin arm64, standalone)
+✓ CLI     opensume 0.4.2 (bun 1.4.2, darwin arm64, standalone)
 ✓ Update  latest release
 ✓ Config  ~/.config/opensume/config.json (mode 600)
 ✓ API     https://api.open.sume.com · ok · build 5fadc7571 (open-v0.2.0) · public · 197ms
@@ -351,7 +351,7 @@ Without `--json`, results go to stdout and everything else (progress, notes, err
 | `6` | `--timeout` passed while the job was still running |
 | `7` | Balance too low, or the price is over `--max-usd` |
 | `8` | Rate limit or concurrency cap; retry later |
-| `130` | Interrupted with Ctrl-C (the job keeps running) |
+| `130` | Stopped by Ctrl-C, SIGTERM or SIGHUP (the job keeps running; the error names it) |
 
 **The whole command tree as JSON:** `opensume --help --json`. It is generated from the same definitions as `--help`, so it never drifts. `opensume schema <model> --json` gives a model's inputs the same way.
 
@@ -405,9 +405,13 @@ opensume run  ──▶  POST /v1/{image,video}-router/generate   202 + job id, 
 ```
 
 - **Picking the endpoint.** The model's `kind` in the open catalog decides it. Image models go to the image router; video, lip-sync and captions go to the video router.
-- **Polling.** The CLI follows the API's `next_poll_after_seconds`, capped at 5 s for the first minute of waiting, 10 s up to ten minutes, and 15 s after that, so a job that finishes early is noticed early. Transient errors (network, 429, 5xx) are retried and do not end the wait.
-- **Retries.** Reads, and submits that carry an idempotency key, are retried with backoff, honoring `retry-after`.
+- **Polling.** The CLI follows the API's `next_poll_after_seconds`, capped at 5 s for the first minute of waiting, 10 s up to ten minutes, and 15 s after that, so a job that finishes early is noticed early. Transient errors (network, 429, 5xx) are retried and do not end the wait. If several reads in a row fail, the CLI says it lost contact, keeps trying, and says when it is back.
+- **Retries.** Reads, submits that carry an idempotency key, upload targets and the upload itself are retried with backoff, honoring `retry-after`. A connection that drops halfway through an answer counts as a network error. When retries run out, the error says how many tries there were. A proxy's HTML error page is reported by its status, like `502 Bad Gateway`, with a pointer to https://status.sume.com.
 - **Files.** By default the CLI saves a job's final outputs. Intermediate files, like a video's poster frame, are listed in `--json` and saved only with `--all-files`.
+- **Saving safely.** Each file is written to a `.part` file and gets its name only when it is complete. Before that, the CLI checks the size against `Content-Length` and against the job's declared size and checksum when it has them. An empty body or a web page in place of an image is refused and retried. A full or read-only disk is reported at once rather than retried.
+- **Partial saves.** One file that cannot be saved does not stop the others. The command exits 1, names the missing files and prints the command that gets them. A file already saved under the job's default name is complete, so `opensume jobs wait <id>` skips it and fetches only what is missing.
+- **Checked before paying.** `run` checks everything it can on this machine before it submits: that `-o` can be written (or that the current folder can, without `-o`), that every local file exists and has a media type, the key, the webhook URL, the idempotency key, and number ranges. An empty value, such as `--image "$UNSET"`, is refused rather than dropped.
+- **Signals.** Ctrl-C, SIGTERM and SIGHUP stop the wait, not the job. The CLI exits 130 with an error that names the job (`job_id` in `--json`), so a harness that kills a slow run can still collect it with `opensume jobs wait`.
 
 ## Troubleshooting
 
@@ -420,6 +424,10 @@ opensume run  ──▶  POST /v1/{image,video}-router/generate   202 + job id, 
 | `Balance too low` (exit 7) | Top up at open.sume.com → Billing. The error shows the price and your balance. |
 | `concurrency_limit_reached` (exit 8) | Your workspace has as many jobs in flight as it may. Wait for one to finish. |
 | `Stopped waiting after …` (exit 6) | The job is still running. `opensume jobs wait <id>` collects it later; do not resubmit. |
+| `Saved 1 of 2 files. Could not download …` (exit 1) | The job finished and was paid for; one file did not arrive. Run the command the error prints (`opensume jobs wait <id>`); it fetches only the missing files. |
+| `Cannot save files to …` (exit 2) | `-o` (or the current folder) cannot be written. Nothing was submitted. Pick another folder, or pass `--no-download` to print URLs. |
+| `--image is empty` (exit 2) | A flag got an empty value, usually from a shell variable that is not set. |
+| `Lost contact with the API` | Status reads are failing. The CLI keeps trying until `--timeout`; the job keeps running. See https://status.sume.com. |
 | Anything else | Run `opensume doctor`, then re-run with `--verbose` and quote the request id (`req_…`) when you ask for help. |
 
 ## Uninstall

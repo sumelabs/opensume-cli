@@ -3,6 +3,7 @@ import { CliError, ExitCode } from "../lib/errors.ts";
 import type { ApiErrorBody } from "./types.ts";
 
 const BILLING_URL = "https://open.sume.com/billing";
+const STATUS_URL = "https://status.sume.com";
 
 /** A non-2xx answer from the API, with its `error` envelope. */
 export class ApiError extends CliError {
@@ -110,11 +111,16 @@ function hintFor(status: number, body: ApiErrorBody, baseUrl: string | undefined
     default:
       break;
   }
-  if (status === 429) return "Slow down and retry after a moment.";
+  if (status === 429) {
+    const after = body.retry_after_seconds;
+    return typeof after === "number" && after > 0
+      ? `Rate limited: retry in ${Math.ceil(after)}s.`
+      : "Slow down and retry after a moment.";
+  }
   if (status >= 500) {
     return body.retryable === false
       ? "This is on Sume's side, and the same request will fail again. Quote the request id to support."
-      : "This is on Sume's side. Retry, and quote the request id if it persists.";
+      : `This is on Sume's side. Retry in a minute (status: ${STATUS_URL}), and quote the request id if it persists.`;
   }
   return undefined;
 }

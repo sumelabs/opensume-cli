@@ -9,8 +9,10 @@ export interface WaitOptions {
   signal?: AbortSignal | undefined;
   /** Called with every status read, for progress display. */
   onStatus?: (status: StatusResponse) => void;
-  /** A transient read failure the loop is riding out. */
-  onRetry?: (error: Error) => void;
+  /** A transient read failure the loop is riding out, and how many in a row so far. */
+  onRetry?: (error: Error, consecutive: number) => void;
+  /** A read succeeded after `failures` failed ones in a row. */
+  onRecover?: (failures: number) => void;
   /** The delay chosen before the next read, and the API's own hint. */
   onDelay?: (delaySeconds: number, hintSeconds: number | null) => void;
   /** Awaited after every status read, before waiting again (`--logs` reads events here). */
@@ -48,11 +50,12 @@ export async function waitForJob(client: SumeClient, jobId: string, options: Wai
   const started = now();
   const deadline = started + options.timeoutMs;
   let delayMs = Math.min(Math.max(options.firstDelaySeconds ?? 0, 0), maxDelaySeconds(0)) * 1000;
+  let failures = 0;
 
   for (;;) {
     if (delayMs > 0) {
       const remaining = deadline - now();
-      if (remaining <= 0) throw timeoutError(jobId, options.timeoutMs);
+      if (remaining <= 0) throw timeoutError(jobId, options.timeoutMs, failures);
       await sleep(Math.min(delayMs, remaining), options.signal);
     }
     let status: StatusResponse;
@@ -65,14 +68,17 @@ export async function waitForJob(client: SumeClient, jobId: string, options: Wai
     } catch (error) {
       if (options.signal?.aborted) throw error;
       if (!isTransient(error)) throw error;
-      options.onRetry?.(error as Error);
+      failures++;
+      options.onRetry?.(error as Error, failures);
       delayMs = 5000;
       continue;
     }
+    if (failures > 0) options.onRecover?.(failures);
+    failures = 0;
     options.onStatus?.(status);
     if (status.terminal) return status;
     await options.onPoll?.(status);
-    if (now() >= deadline) throw timeoutError(jobId, options.timeoutMs);
+    if (now() >= deadline) throw timeoutError(jobId, options.timeoutMs, 0);
     const hint = status.next_poll_after_seconds ?? pollAfter ?? status.recommended_poll_interval_seconds ?? null;
     const delayS = clampDelay(hint ?? DEFAULT_DELAY_S, maxDelaySeconds(now() - started));
     options.onDelay?.(delayS, hint);
@@ -90,8 +96,14 @@ function isTransient(error: unknown): boolean {
   return error instanceof CliError && error.code === "network_error";
 }
 
-function timeoutError(jobId: string, timeoutMs: number): CliError {
-  return new CliError(`Stopped waiting after ${Math.round(timeoutMs / 1000)}s; job ${jobId} is still running.`, {
+function timeoutError(jobId: string, timeoutMs: number, failedReads: number): CliError {
+  const waited = `Stopped waiting after ${Math.round(timeoutMs / 1000)}s`;
+  // After failed reads the CLI does not know the job's state; say so.
+  const message =
+    failedReads > 0
+      ? `${waited}: the last ${failedReads} status read${failedReads === 1 ? "" : "s"} failed, so job ${jobId} may still be running.`
+      : `${waited}; job ${jobId} is still running.`;
+  return new CliError(message, {
     exitCode: ExitCode.Timeout,
     code: "wait_timeout",
     hint: `Pick it up later with \`opensume jobs wait ${jobId}\`.`,

@@ -4,6 +4,25 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-10-15
+
+Hardening, from reading how genmedia (fal's CLI, v0.7.0) fails and checking each case in opensume against a mock that drops connections, serves proxy error pages and fills disks.
+
+### Fixed
+
+- **Nothing is paid for that cannot be saved.** `run` checks that `-o` (or the current folder) can be written before it submits; a file in the way or a read-only folder is refused, exit 2, with nothing submitted. Before, the job ran and was charged, then the save failed (`EACCES` after three retries, or a crash on `EEXIST`).
+- **Partial saves are reported, and resumable.** One file that cannot be downloaded no longer stops the others. The command exits 1, names the missing files (in `--json`, `path: null` with an `error` per artifact) and prints `opensume jobs wait <id>`. That command now keeps files already saved under the job's default name, which are complete because files get their name only when finished, and fetches only the rest instead of saving `-2` copies.
+- **Downloads are checked before they get a name.** An empty body, or a web page served in place of an image (a captive portal, a proxy), is refused and retried. The job's declared `size_bytes` and `checksum_sha256` are checked when present. Disk errors (read-only, full, permission) are reported at once with the path, not retried.
+- **A connection that drops mid-answer** is a network error that is retried, not "Unexpected error". When retries run out, errors say how many tries there were.
+- **A proxy's HTML error page** is reported by its status (`api.open.sume.com answered 502 Bad Gateway (tried 4 times).`), with a pointer to https://status.sume.com, instead of 200 characters of HTML.
+- **Uploads retry.** The PUT to storage is retried on a dropped connection or a busy store; it is signed for the exact size, so this is safe. Creating the upload target is retried too. `upload` checks every local file before the first upload, and reports which uploads failed instead of losing the URLs of the ones that worked. `upload <url>` says why a fetch failed.
+- **Empty values are refused.** `--image "$UNSET"` used to drop the image and run a different, paid request. Every flag and argument now refuses an empty value and says the variable is probably not set.
+- **The API's own limits are checked first.** These are refused locally with the rule spelled out: `--limit` outside 1–100 on `jobs list` and `jobs events`, `--max-usd` below 0, `-n` or `-d` below 1, an `--idempotency-key` that is not 1–255 printable ASCII characters (it used to surface as a fake network error), a `--webhook` that is not https, and a media value like `https://` that is not a URL. A missing local file is reported before pricing.
+- **A missing key fails at once**, before any network call.
+- **Mid-wait outages are visible.** After three failed status reads in a row, the CLI says it lost contact and keeps trying; it says when contact is back. A `--timeout` reached during an outage says the job's state is unknown, rather than "still running".
+- **SIGTERM and SIGHUP** stop the wait like Ctrl-C: exit 130, with an error that names the job (`job_id` and a `jobs wait` hint in `--json`). A harness that kills a slow run can collect the job instead of resubmitting it and paying twice.
+- **Clear errors instead of crashes** for a config file that cannot be read or written, an `agent --write` or `init` target that is a folder or read-only, `--input` (which now says: no such file, a folder, or where the JSON breaks), `update` losing its connection, and a status read without `sume_status`.
+
 ## [0.4.1] - 2026-10-15
 
 ### Security
@@ -127,7 +146,8 @@ The first release: every model on open.sume.com, from the terminal.
 - Standalone binaries for macOS (arm64, x64), Linux (x64, arm64; glibc and musl) and Windows x64, built to run on CPUs without AVX2. Checksum-verified `install.sh` and `install.ps1`, an npm tarball on each release, and `opensume update`.
 - An agent skill in `skills/opensume`.
 
-[Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/sumelabs/opensume-cli/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/sumelabs/opensume-cli/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/sumelabs/opensume-cli/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sumelabs/opensume-cli/compare/v0.2.4...v0.3.0

@@ -90,8 +90,26 @@ const MODELS = [
   },
 ];
 
+/**
+ * A failure the mock serves instead of its normal answer, for the next
+ * `times` requests whose method and path match.
+ * - `drop`: close the connection without an answer.
+ * - `drop-body`: send the headers and part of the body, then close.
+ * - `html`: a proxy's error page, `status` (default 502) with HTML.
+ * - `empty`: 200 with no body. `page`: 200 with an HTML page.
+ * - `status`: the API's own JSON error with `status`.
+ */
+export interface Fault {
+  method?: string;
+  path: string | RegExp;
+  times: number;
+  kind: "drop" | "drop-body" | "html" | "empty" | "page" | "status";
+  status?: number;
+}
+
 export class MockApi {
   readonly requests: Recorded[] = [];
+  faults: Fault[] = [];
   readonly jobs = new Map<string, MockJob>();
   readonly uploads = new Map<string, { size: number; received: number; contentType: string }>();
   /** Answer the next N submits with this status (for retry tests). */
@@ -137,6 +155,46 @@ export class MockApi {
     const isJson = (req.headers["content-type"] ?? "").includes("json");
     const body = isJson && raw.length ? JSON.parse(raw.toString("utf8")) : undefined;
     this.requests.push({ method: req.method ?? "GET", path: url.pathname, headers: req.headers, body });
+
+    const fault = this.faults.find(
+      (f) =>
+        f.times > 0 &&
+        (!f.method || f.method === req.method) &&
+        (typeof f.path === "string" ? url.pathname.startsWith(f.path) : f.path.test(url.pathname)),
+    );
+    if (fault) {
+      fault.times--;
+      switch (fault.kind) {
+        case "drop":
+          req.socket.destroy();
+          return;
+        case "drop-body":
+          res.writeHead(200, { "content-type": "application/json", "content-length": "5000" });
+          res.write('{"data": {"partial"');
+          setTimeout(() => req.socket.destroy(), 5);
+          return;
+        case "html":
+          res.writeHead(fault.status ?? 502, { "content-type": "text/html" });
+          res.end("<html><head><title>502 Bad Gateway</title></head><body><center>nginx</center></body></html>");
+          return;
+        case "empty":
+          res.writeHead(200, { "content-type": "image/png", "content-length": "0" });
+          res.end();
+          return;
+        case "page":
+          res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+          res.end("<html><body>Sign in to the Wi-Fi</body></html>");
+          return;
+        case "status":
+          res.writeHead(fault.status ?? 503, { "content-type": "application/json" });
+          res.end(
+            JSON.stringify({
+              error: { code: "unavailable", message: "Busy.", request_id: "req_fault", retryable: true },
+            }),
+          );
+          return;
+      }
+    }
 
     const send = (status: number, payload: unknown, headers: Record<string, string> = {}) => {
       res.writeHead(status, {

@@ -202,15 +202,21 @@ export async function main(options: MainOptions): Promise<number> {
       options.cwd ?? process.cwd(),
     );
     const controller = new AbortController();
-    const onSigint = () => {
-      controller.abort(Object.assign(new Error("Interrupted."), { name: "AbortError" }));
-      // A second Ctrl-C quits at once, with the terminal's cursor restored.
-      process.once("SIGINT", () => {
-        ui.stopSpinner();
-        process.exit(ExitCode.Interrupted);
-      });
+    // Ctrl-C, and the SIGTERM a harness or `timeout` sends, end the command the
+    // same way: the job keeps running, and the error (JSON with --json) names
+    // it, so nobody resubmits and pays twice.
+    const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+    const quitNow = () => {
+      ui.stopSpinner();
+      process.exit(ExitCode.Interrupted);
     };
-    if (!options.signal) process.once("SIGINT", onSigint);
+    const onSignal = () => {
+      for (const name of signals) process.removeListener(name, onSignal);
+      controller.abort(Object.assign(new Error("Interrupted."), { name: "AbortError" }));
+      // A second signal quits at once, with the terminal's cursor restored.
+      for (const name of signals) process.once(name, quitNow);
+    };
+    if (!options.signal) for (const name of signals) process.once(name, onSignal);
     options.signal?.addEventListener("abort", () => controller.abort(options.signal?.reason), { once: true });
     const ctx = createContext({
       ui,
@@ -228,7 +234,10 @@ export async function main(options: MainOptions): Promise<number> {
       if (controller.signal.aborted) return interrupted(ui, json, ctx);
       return report(ui, error, json, ctx);
     } finally {
-      process.removeListener("SIGINT", onSigint);
+      for (const name of signals) {
+        process.removeListener(name, onSignal);
+        process.removeListener(name, quitNow);
+      }
     }
   } catch (error) {
     return report(ui, error, json);
@@ -270,7 +279,8 @@ function chainFor(names: readonly string[]): CommandSpec[] {
 function interrupted(ui: Ui, json: boolean, job: JobContext): number {
   ui.stopSpinner();
   if (json) {
-    ui.json({ error: { code: "interrupted", message: "Interrupted.", ...jobFields(job) } });
+    const hint = job.jobId ? `Pick it up with: opensume jobs wait ${job.jobId}` : jobHint(job);
+    ui.json({ error: { code: "interrupted", message: "Interrupted.", ...(hint ? { hint } : {}), ...jobFields(job) } });
   } else if (job.jobId) {
     ui.error(
       `Stopped waiting. Job ${job.jobId} keeps running on Sume.`,

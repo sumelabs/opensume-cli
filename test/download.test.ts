@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Artifact } from "../src/api/types.ts";
-import { planPaths, shortJobId } from "../src/lib/download.ts";
+import { type PlanOptions, planPaths as plan, shortJobId } from "../src/lib/download.ts";
 import { extensionFor } from "../src/lib/media.ts";
 
 const artifact = (content_type: string, url = "https://media.sume.com/a/file"): Artifact => ({
@@ -14,6 +14,8 @@ const artifact = (content_type: string, url = "https://media.sume.com/a/file"): 
 });
 const jobId = "job_7513b52d-3669-4ffe-b317-8b02000715eb";
 const cwd = () => mkdtempSync(join(tmpdir(), "opensume-dl-"));
+const planPaths = async (artifacts: Artifact[], options: PlanOptions) =>
+  (await plan(artifacts, options)).map((p) => p.path);
 
 describe("planPaths", () => {
   it("names files after the model and job by default", async () => {
@@ -25,13 +27,29 @@ describe("planPaths", () => {
 
   it("numbers several files and never overwrites by default", async () => {
     const dir = cwd();
-    writeFileSync(join(dir, "gpt-image-2-7513b52d-1.png"), "taken");
+    // Something else under the name (a folder, an empty file) is never overwritten: the file is numbered.
+    mkdirSync(join(dir, "gpt-image-2-7513b52d-1.png"));
+    writeFileSync(join(dir, "gpt-image-2-7513b52d-2.png"), "");
     const paths = await planPaths([artifact("image/png"), artifact("image/png")], {
       model: "gpt-image-2",
       jobId,
       cwd: dir,
     });
-    expect(paths).toEqual([join(dir, "gpt-image-2-7513b52d-1-2.png"), join(dir, "gpt-image-2-7513b52d-2.png")]);
+    expect(paths).toEqual([join(dir, "gpt-image-2-7513b52d-1-2.png"), join(dir, "gpt-image-2-7513b52d-2-2.png")]);
+  });
+
+  it("keeps a finished file under the job's own name, so a second wait fetches only what is missing", async () => {
+    const dir = cwd();
+    writeFileSync(join(dir, "gpt-image-2-7513b52d-1.png"), "saved before");
+    const planned = await plan([artifact("image/png"), artifact("image/png")], {
+      model: "gpt-image-2",
+      jobId,
+      cwd: dir,
+    });
+    expect(planned).toEqual([
+      { path: join(dir, "gpt-image-2-7513b52d-1.png"), existing: true },
+      { path: join(dir, "gpt-image-2-7513b52d-2.png"), existing: false },
+    ]);
   });
 
   it("writes an explicit file name as given, numbering the rest", async () => {

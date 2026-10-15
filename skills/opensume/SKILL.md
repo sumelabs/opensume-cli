@@ -35,4 +35,4 @@ opensume run seedance-2-mini "a paper boat" -d 4 -r 480p --max-usd 0.50 -o out/ 
 
 **When it fails**
 
-Exit codes: 1 network or server (retry), 2 bad flags, 3 key (follow `error.hint`), 4 input refused (fix what `error.message` says), 5 job failed (refunded; `opensume jobs get <job>` says why), 6 timed out, 7 balance or cap, 8 rate limit. With `--json`, errors are `{"error": {"code", "message", "hint", "request_id"}}`. Every command and flag: `opensume --help --json`. Docs: https://open.sume.com/docs
+Exit codes: 1 network or server (retry), 2 bad flags, 3 key (follow `error.hint`), 4 input refused (fix what `error.message` says), 5 job failed (refunded; `opensume jobs get <job>` says why), 6 timed out, 7 balance or cap, 8 rate limit, 130 stopped by Ctrl-C or SIGTERM (the job keeps running; `jobs wait` it). Exit 1 after a finished job means a file was not saved: run the command the error prints; it fetches only the missing files. With `--json`, errors are `{"error": {"code", "message", "hint", "request_id"}}`. Every command and flag: `opensume --help --json`. Docs: https://open.sume.com/docs

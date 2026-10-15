@@ -10,6 +10,7 @@ import type {
   Job,
   JobEvents,
   JobList,
+  JobState,
   ResultResponse,
   StatusResponse,
   SubmitResponse,
@@ -159,10 +160,11 @@ export class SumeClient {
 
   async getStatus(id: string, signal?: AbortSignal): Promise<ApiResponse<StatusResponse>> {
     // Short: a status read that hangs should be retried, not waited out.
-    return this.request<StatusResponse>("GET", `/v1/jobs/${encodeURIComponent(id)}/status`, {
+    const res = await this.request<StatusResponse>("GET", `/v1/jobs/${encodeURIComponent(id)}/status`, {
       signal,
       timeoutMs: 20_000,
     });
+    return { ...res, data: normalizeStatus(res.data) };
   }
 
   async getJob(id: string, signal?: AbortSignal): Promise<Job> {
@@ -205,7 +207,9 @@ export class SumeClient {
     params: { content_type: string; size_bytes: number; filename?: string },
     signal?: AbortSignal,
   ): Promise<UploadTarget> {
-    return (await this.request<UploadTarget>("POST", "/v1/assets/upload-url", { body: params, signal })).data;
+    // Creating an upload target costs nothing; a retry at worst leaves an unused pending asset.
+    return (await this.request<UploadTarget>("POST", "/v1/assets/upload-url", { body: params, retry: true, signal }))
+      .data;
   }
 
   async completeUpload(id: string, sizeBytes: number, signal?: AbortSignal): Promise<Asset> {
@@ -227,15 +231,19 @@ export class SumeClient {
     return url.toString();
   }
 
+  /** Throws the "no key" error when there is no key: for commands that will need one, before any work. */
+  requireKey(): void {
+    if (this.#apiKey) return;
+    throw new CliError("No API key. Set SUME_API_KEY, put it in ./.env, or run `opensume auth login`.", {
+      exitCode: ExitCode.Auth,
+      code: "missing_api_key",
+      hint: "A person makes the key at https://open.sume.com/api-keys (an agent cannot).",
+    });
+  }
+
   async request<T>(method: "GET" | "POST", path: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
     const auth = options.auth ?? "required";
-    if (auth === "required" && !this.#apiKey) {
-      throw new CliError("No API key. Set SUME_API_KEY, put it in ./.env, or run `opensume auth login`.", {
-        exitCode: ExitCode.Auth,
-        code: "missing_api_key",
-        hint: "A person makes the key at https://open.sume.com/api-keys (an agent cannot).",
-      });
-    }
+    if (auth === "required") this.requireKey();
     const url = this.url(path, options.query);
     const headers: Record<string, string> = {
       accept: "application/json",
@@ -268,7 +276,7 @@ export class SumeClient {
           await this.#sleep(backoffMs(attempt), options.signal);
           continue;
         }
-        throw networkError(url, error);
+        throw networkError(url, error, attempt);
       }
       const requestId = response.headers.get("x-sume-request-id") ?? undefined;
       this.#onResponse?.({
@@ -279,7 +287,19 @@ export class SumeClient {
         requestId,
         ms: Math.round(performance.now() - started),
       });
-      const text = await response.text();
+      // The connection can also drop, or time out, after the headers: that is a
+      // network failure like any other, not a crash.
+      let text: string;
+      try {
+        text = await response.text();
+      } catch (error) {
+        if (options.signal?.aborted) throw options.signal.reason;
+        if (attempt < attempts) {
+          await this.#sleep(backoffMs(attempt), options.signal);
+          continue;
+        }
+        throw networkError(url, error, attempt);
+      }
       const json = parseJson(text);
 
       if (response.ok) {
@@ -293,16 +313,40 @@ export class SumeClient {
         return { data: envelope.data as T, status: response.status, requestId, headers: response.headers };
       }
 
-      const errorBody = toErrorBody(json, response.status, text);
-      const apiError = new ApiError(response.status, errorBody, requestId, this.baseUrl);
+      const errorBody = toErrorBody(json, response.status, text, new URL(url).host);
       if (attempt < attempts && RETRY_STATUSES.has(response.status) && errorBody.code !== "concurrency_limit_reached") {
         const after = retryAfterMs(response.headers, errorBody);
         await this.#sleep(after ?? backoffMs(attempt), options.signal);
         continue;
       }
-      throw apiError;
+      // Say so when the answer held through retries: it is not a blip.
+      if (attempt > 1) errorBody.message = `${errorBody.message.replace(/\.$/u, "")} (tried ${attempt} times).`;
+      throw new ApiError(response.status, errorBody, requestId, this.baseUrl);
     }
   }
+}
+
+const QUEUE_STATES: Record<string, JobState> = {
+  IN_QUEUE: "queued",
+  QUEUED: "queued",
+  IN_PROGRESS: "processing",
+  PROCESSING: "processing",
+  COMPLETED: "completed",
+  FAILED: "failed",
+  CANCELED: "canceled",
+  CANCELLED: "canceled",
+};
+const TERMINAL: ReadonlySet<string> = new Set(["completed", "failed", "canceled"]);
+
+/**
+ * `sume_status` and `terminal` drive the wait. Should a read ever lack them,
+ * they follow from the queue-style `status`, so the wait neither stops early
+ * nor runs to its timeout on a finished job.
+ */
+export function normalizeStatus(status: StatusResponse): StatusResponse {
+  const state = status.sume_status ?? QUEUE_STATES[String(status.status ?? "").toUpperCase()];
+  if (!state) return status;
+  return { ...status, sume_status: state, terminal: status.terminal ?? TERMINAL.has(state) };
 }
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -363,15 +407,34 @@ function parseJson(text: string): unknown {
   }
 }
 
-function toErrorBody(json: unknown, status: number, text: string): ApiErrorBody {
+const STATUS_TEXT: Record<number, string> = {
+  400: "Bad Request",
+  401: "Unauthorized",
+  403: "Forbidden",
+  404: "Not Found",
+  408: "Request Timeout",
+  413: "Payload Too Large",
+  429: "Too Many Requests",
+  500: "Internal Server Error",
+  502: "Bad Gateway",
+  503: "Service Unavailable",
+  504: "Gateway Timeout",
+};
+
+function toErrorBody(json: unknown, status: number, text: string, host: string): ApiErrorBody {
   const error = (json as { error?: unknown } | undefined)?.error;
   if (error && typeof error === "object" && typeof (error as ApiErrorBody).code === "string") {
-    return error as ApiErrorBody;
+    return { ...(error as ApiErrorBody) };
   }
-  const snippet = text.trim().slice(0, 200);
+  // Not the API's own envelope: a proxy or load balancer answered. Its HTML
+  // page says nothing useful, so name the status; short plain text is kept.
+  const name = `${status}${STATUS_TEXT[status] ? ` ${STATUS_TEXT[status]}` : ""}`;
+  const snippet = text.trim().replace(/\s+/gu, " ").slice(0, 200);
+  const readable = snippet && !snippet.startsWith("<") ? `: ${snippet}` : "";
   return {
     code: `http_${status}`,
-    message: snippet ? `The API answered ${status}: ${snippet}` : `The API answered ${status}.`,
+    message: `${host} answered ${name}${readable}.`,
+    ...(status >= 500 ? { retryable: true } : {}),
   };
 }
 
@@ -388,19 +451,26 @@ export function backoffMs(attempt: number): number {
   return Math.round(base * (0.75 + Math.random() * 0.5));
 }
 
-function networkError(url: string, error: unknown): CliError {
+function networkError(url: string, error: unknown, attempts = 1): CliError {
   const host = new URL(url).host;
-  const reason =
-    error instanceof Error && error.name === "TimeoutError"
-      ? "timed out"
-      : error instanceof Error
-        ? ((error.cause as { code?: string } | undefined)?.code ?? redact(error.message))
-        : redact(String(error));
-  return new CliError(`Could not reach ${host} (${reason}).`, {
+  const tries = attempts > 1 ? `, tried ${attempts} times` : "";
+  return new CliError(`Could not reach ${host} (${networkReason(error)}${tries}).`, {
     code: "network_error",
     hint: "Check your connection, or the base URL with `opensume auth status`.",
     cause: error,
   });
+}
+
+/** `timed out`, `ECONNREFUSED`, `ENOTFOUND`…: the short reason a request never got an answer. */
+export function networkReason(error: unknown): string {
+  if (!(error instanceof Error)) return redact(String(error));
+  if (error.name === "TimeoutError") return "timed out";
+  // Node wraps the reason in `cause` (an AggregateError when it tried several
+  // addresses); Bun puts a code on the error itself.
+  const cause = error.cause as { code?: string; message?: string; errors?: { code?: string }[] } | undefined;
+  const code = cause?.code ?? cause?.errors?.find((e) => e.code)?.code ?? (error as { code?: string }).code;
+  if (code) return code;
+  return redact(cause?.message || error.message);
 }
 
 /** Errors from the HTTP stack can quote header values; never let a key through. */

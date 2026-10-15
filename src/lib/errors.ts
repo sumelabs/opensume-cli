@@ -20,7 +20,7 @@ export const ExitCode = {
   Funds: 7,
   /** Rate limit or concurrency cap. Retry later. */
   RateLimited: 8,
-  /** Stopped with Ctrl-C. */
+  /** Stopped with Ctrl-C, or told to stop (SIGTERM, SIGHUP). The job keeps running. */
   Interrupted: 130,
 } as const;
 

@@ -75,8 +75,14 @@ export function readConfig(path: string): StoredConfig {
   try {
     text = readFileSync(path, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
-    throw error;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return {};
+    throw new CliError(`Cannot read ${path}: ${code === "EACCES" ? "permission denied" : (code ?? "error")}.`, {
+      exitCode: ExitCode.Error,
+      code: "config_unreadable",
+      hint: "Fix its permissions (it should be yours, mode 600), or set OPENSUME_CONFIG_DIR elsewhere.",
+      cause: error,
+    });
   }
   try {
     const parsed = JSON.parse(text) as unknown;
@@ -98,11 +104,22 @@ export function readConfig(path: string): StoredConfig {
 
 /** Write atomically, readable by the owner only (the file holds a key). */
 export function writeConfig(path: string, config: StoredConfig): void {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const temp = `${path}.${process.pid}.tmp`;
-  writeFileSync(temp, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
-  renameSync(temp, path);
-  if (process.platform !== "win32") chmodSync(path, 0o600);
+  try {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    writeFileSync(temp, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+    renameSync(temp, path);
+    if (process.platform !== "win32") chmodSync(path, 0o600);
+  } catch (error) {
+    rmSync(temp, { force: true });
+    const code = (error as NodeJS.ErrnoException).code;
+    throw new CliError(`Cannot save ${path}: ${code === "EACCES" ? "permission denied" : (code ?? "error")}.`, {
+      exitCode: ExitCode.Error,
+      code: "config_unwritable",
+      hint: "Set OPENSUME_CONFIG_DIR to a folder you can write, or use SUME_API_KEY instead of a saved key.",
+      cause: error,
+    });
+  }
 }
 
 export function removeConfig(path: string): void {

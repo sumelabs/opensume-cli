@@ -37,7 +37,7 @@ async function estimateCommand(parsed: Parsed, ctx: Context): Promise<number> {
   }
   ui.spin(`Pricing ${modelId}`);
   const model = await resolveModel(ctx, modelId);
-  const body = await buildBody(model, { ...flags, prompt: positionalPrompt ?? flags.prompt });
+  const body = await buildBody(model, { ...flags, prompt: positionalPrompt ?? flags.prompt }, undefined, ctx.cwd);
   // Files are priced by the fields that describe them (duration, resolution),
   // not their bytes, so local paths are not uploaded just to get a price.
   const local = localMediaPaths(body);

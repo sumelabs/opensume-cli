@@ -1,10 +1,11 @@
-import { createWriteStream } from "node:fs";
-import { mkdir, rename, rm, stat } from "node:fs/promises";
-import { basename, dirname, extname, join, resolve, sep } from "node:path";
-import { Readable } from "node:stream";
+import { createHash } from "node:crypto";
+import { constants, createWriteStream } from "node:fs";
+import { access, mkdir, rename, rm, stat } from "node:fs/promises";
+import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
+import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
-import { backoffMs, sleep } from "../api/client.ts";
+import { backoffMs, networkReason, sleep } from "../api/client.ts";
 import type { Artifact } from "../api/types.ts";
 import { CliError, UsageError } from "./errors.ts";
 import { extensionFor } from "./media.ts";
@@ -13,6 +14,49 @@ export interface SavedFile {
   path: string;
   bytes: number;
   artifact: Artifact;
+  /** It was already there from an earlier run (`jobs wait` after a partial save), so it was not fetched again. */
+  existing?: boolean;
+}
+
+export interface PlannedPath {
+  path: string;
+  /** A finished download of this artifact is already at `path`. */
+  existing: boolean;
+}
+
+/** File-system failures a retry cannot fix, in words a person reads. */
+const LOCAL_ERRORS: Record<string, string> = {
+  EACCES: "permission denied",
+  EPERM: "permission denied",
+  EROFS: "the disk is read-only",
+  ENOSPC: "the disk is full",
+  EDQUOT: "the disk quota is used up",
+  EISDIR: "a folder has that name",
+  ENOTDIR: "part of the path is a file, not a folder",
+  EEXIST: "part of the path is a file, not a folder",
+  ENAMETOOLONG: "the name is too long",
+  EMFILE: "too many files are open",
+  ENFILE: "too many files are open",
+};
+
+/**
+ * A local write failure as an explained error, or undefined for anything
+ * else. `elsewhere` says how to pick another place, for this command.
+ */
+export function localWriteError(
+  path: string,
+  error: unknown,
+  elsewhere = "Save somewhere you can write to with -o.",
+): CliError | undefined {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  const reason = code ? LOCAL_ERRORS[code] : undefined;
+  if (!reason) return undefined;
+  const full = code === "ENOSPC" || code === "EDQUOT";
+  return new CliError(`Cannot write ${path}: ${reason}.`, {
+    code: full ? "disk_full" : "write_failed",
+    hint: full ? "Free some space, then run it again." : elsewhere,
+    cause: error,
+  });
 }
 
 export interface PlanOptions {
@@ -45,14 +89,68 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+async function isFinishedFile(path: string): Promise<boolean> {
+  try {
+    const info = await stat(path);
+    return info.isFile() && info.size > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Before anything is paid for or waited on: the folder files will be saved
+ * in must be writable, or creatable inside a writable folder. A job whose
+ * file cannot be saved is a job paid for twice.
+ */
+export async function checkWritable(output: string | undefined, cwd: string): Promise<void> {
+  let dir: string;
+  let file: string | undefined;
+  if (!output) dir = cwd;
+  else if (isTemplate(output)) dir = dirname(resolve(cwd, output.replace(/\{[a-z_]+\}/gu, "x")));
+  else {
+    const full = resolve(cwd, output);
+    if (isDirectoryHint(output) || (await isDirectory(full))) dir = full;
+    else [dir, file] = [dirname(full), full];
+  }
+  const fail = (why: string) =>
+    new UsageError(
+      `Cannot save files to ${relative(cwd, dir) || "."}: ${why}.`,
+      "Pick a folder you can write to with -o, or pass --no-download to print the URLs instead.",
+    );
+  // A named file that is there already is overwritten, so it must be writable too.
+  if (file && (await exists(file))) {
+    await access(file, constants.W_OK).catch(() => {
+      throw fail(`${basename(file as string)} is not writable`);
+    });
+  }
+  // The nearest folder that exists decides; the rest is created when saving.
+  for (let probe = dir; ; ) {
+    const info = await stat(probe).catch(() => undefined);
+    if (info) {
+      if (!info.isDirectory()) throw fail(`${relative(cwd, probe) || probe} is a file, not a folder`);
+      await access(probe, constants.W_OK).catch(() => {
+        throw fail(`${relative(cwd, probe) || probe} is not writable`);
+      });
+      return;
+    }
+    const parent = dirname(probe);
+    if (parent === probe) return;
+    probe = parent;
+  }
+}
+
 /**
  * Where each artifact goes. With no `-o`, files land in the working
  * directory as `<model>-<job>.<ext>` and never overwrite anything. A named
  * file is written as given (the first artifact) and numbered after that.
  */
-export async function planPaths(artifacts: readonly Artifact[], options: PlanOptions): Promise<string[]> {
+export async function planPaths(artifacts: readonly Artifact[], options: PlanOptions): Promise<PlannedPath[]> {
   const exts = artifacts.map((a) => extensionFor(a.content_type, a.url, a.type));
-  if (options.output && isTemplate(options.output)) return fillTemplate(options.output, artifacts, exts, options);
+  const fresh = (path: string): PlannedPath => ({ path, existing: false });
+  if (options.output && isTemplate(options.output)) {
+    return fillTemplate(options.output, artifacts, exts, options).map(fresh);
+  }
   const many = artifacts.length > 1;
   const stem = `${(options.model ?? "sume").replace(/[^A-Za-z0-9._-]+/gu, "-")}-${shortJobId(options.jobId)}`;
 
@@ -63,14 +161,22 @@ export async function planPaths(artifacts: readonly Artifact[], options: PlanOpt
   if (intoDirectory) {
     const dir = output ?? options.cwd;
     const taken = new Set<string>();
-    const paths: string[] = [];
+    const paths: PlannedPath[] = [];
     for (const [i, ext] of exts.entries()) {
       let candidate = join(dir, `${stem}${many ? `-${i + 1}` : ""}${ext}`);
+      // Files reach their final name only when complete (see downloadTo), so a
+      // file under this job's own name is a finished download: keep it, so a
+      // second `jobs wait` fetches only what is missing.
+      if (!taken.has(candidate) && (await isFinishedFile(candidate))) {
+        taken.add(candidate);
+        paths.push({ path: candidate, existing: true });
+        continue;
+      }
       for (let n = 2; taken.has(candidate) || (await exists(candidate)); n++) {
         candidate = join(dir, `${stem}${many ? `-${i + 1}` : ""}-${n}${ext}`);
       }
       taken.add(candidate);
-      paths.push(candidate);
+      paths.push(fresh(candidate));
     }
     return paths;
   }
@@ -80,7 +186,7 @@ export async function planPaths(artifacts: readonly Artifact[], options: PlanOpt
   const file = output as string;
   const given = extname(file);
   const base = given ? file.slice(0, -given.length) : file;
-  return exts.map((ext, i) => (i === 0 ? `${base}${given || ext}` : `${base}-${i + 1}${ext}`));
+  return exts.map((ext, i) => fresh(i === 0 ? `${base}${given || ext}` : `${base}-${i + 1}${ext}`));
 }
 
 /** A whole download or upload may take this long; a stalled one is retried. */
@@ -92,7 +198,16 @@ export interface DownloadOptions {
   fetch?: typeof globalThis.fetch;
   attempts?: number;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  /** What the file should be, from the artifact: checked before it gets its name. */
+  expect?: {
+    bytes?: number | null | undefined;
+    sha256?: string | null | undefined;
+    /** image, video, audio…: an HTML page or an empty body in its place is an error page, not the file. */
+    kind?: string | undefined;
+  };
 }
+
+const retryable = (message: string) => Object.assign(new Error(message), { retryable: true });
 
 /**
  * Stream one URL to `path` through a `.part` file, so an interrupted
@@ -101,10 +216,12 @@ export interface DownloadOptions {
 export async function downloadTo(url: string, path: string, options: DownloadOptions): Promise<number> {
   const fetcher = options.fetch ?? globalThis.fetch;
   const attempts = options.attempts ?? 3;
-  await mkdir(dirname(path), { recursive: true });
+  const expect = options.expect ?? {};
+  const media = expect.kind !== undefined && expect.kind !== "file";
   const part = `${path}.part`;
   for (let attempt = 1; ; attempt++) {
     try {
+      await mkdir(dirname(path), { recursive: true });
       const timeout = AbortSignal.timeout(TRANSFER_TIMEOUT_MS);
       const res = await fetcher(url, {
         headers: { "user-agent": options.userAgent },
@@ -112,33 +229,51 @@ export async function downloadTo(url: string, path: string, options: DownloadOpt
         redirect: "follow",
       });
       if (!res.ok || !res.body) {
-        const retryable = res.status === 429 || res.status >= 500;
-        throw Object.assign(new Error(`HTTP ${res.status}`), { retryable });
+        throw Object.assign(new Error(`HTTP ${res.status}`), { retryable: res.status === 429 || res.status >= 500 });
       }
-      await pipeline(Readable.fromWeb(res.body as WebReadableStream<Uint8Array>), createWriteStream(part));
+      // A captive portal or a proxy error page arrives as 200 text/html.
+      const type = res.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+      if (media && type === "text/html") throw retryable("got a web page instead of the file");
+      const hash = createHash("sha256");
+      const tap = new Transform({
+        transform(chunk: Buffer, _encoding, done) {
+          hash.update(chunk);
+          done(null, chunk);
+        },
+      });
+      await pipeline(Readable.fromWeb(res.body as WebReadableStream<Uint8Array>), tap, createWriteStream(part));
       const bytes = (await stat(part)).size;
+      if (media && bytes === 0) throw retryable("the download was empty");
       // Content-Length counts the bytes on the wire; a compressed response
       // decodes to more, so the check only holds for an uncompressed one.
       const expected = res.headers.get("content-encoding") ? Number.NaN : Number(res.headers.get("content-length"));
       if (Number.isFinite(expected) && expected > 0 && expected !== bytes) {
-        throw Object.assign(new Error(`got ${bytes} of ${expected} bytes`), { retryable: true });
+        throw retryable(`got ${bytes} of ${expected} bytes`);
+      }
+      if (expect.bytes && expect.bytes !== bytes) throw retryable(`got ${bytes} bytes, the job says ${expect.bytes}`);
+      if (expect.sha256 && hash.digest("hex") !== expect.sha256.toLowerCase()) {
+        throw retryable("the file does not match its checksum");
       }
       await rename(part, path);
       return bytes;
     } catch (error) {
-      await rm(part, { force: true });
+      await rm(part, { force: true }).catch(() => {});
       if (options.signal?.aborted) throw error;
+      // The disk, not the network: retrying cannot help.
+      const local = localWriteError(path, error);
+      if (local) throw local;
       const timedOut = (error as Error).name === "TimeoutError";
-      const retryable = timedOut || ((error as { retryable?: boolean }).retryable ?? true);
-      if (attempt < attempts && retryable) {
+      const again = timedOut || ((error as { retryable?: boolean }).retryable ?? true);
+      if (attempt < attempts && again) {
         await (options.sleep ?? sleep)(backoffMs(attempt), options.signal);
         continue;
       }
-      throw new CliError(`Could not download ${basename(new URL(url).pathname)} (${(error as Error).message}).`, {
-        code: "download_failed",
-        hint: `The file is still at ${url}`,
-        cause: error,
-      });
+      const reason =
+        (error as { retryable?: boolean }).retryable !== undefined ? (error as Error).message : networkReason(error);
+      throw new CliError(
+        `Could not download ${basename(new URL(url).pathname)} (${reason}${attempt > 1 ? `, tried ${attempt} times` : ""}).`,
+        { code: "download_failed", hint: `The file is still at ${url}`, cause: error },
+      );
     }
   }
 }

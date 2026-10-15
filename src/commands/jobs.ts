@@ -1,6 +1,7 @@
 import type { Job } from "../api/types.ts";
 import type { Context } from "../context.ts";
 import type { CommandSpec } from "../lib/args.ts";
+import { checkWritable } from "../lib/download.ts";
 import { ExitCode } from "../lib/errors.ts";
 import { formatAge, formatDuration } from "../lib/ui.ts";
 import { eventLines, eventTail, followJob, jobRow, resolveJobId, timeoutFlag, WAIT_FLAGS } from "./shared.ts";
@@ -13,7 +14,16 @@ const list: CommandSpec = {
   aliases: ["ls"],
   summary: "List your workspace's jobs, newest first",
   flags: [
-    { name: "limit", short: "l", type: "number", placeholder: "<n>", description: "How many, 1–100 (default 20)" },
+    {
+      name: "limit",
+      short: "l",
+      type: "number",
+      min: 1,
+      max: 100,
+      integer: true,
+      placeholder: "<n>",
+      description: "How many, 1–100 (default 20)",
+    },
     { name: "status", short: "s", type: "string", choices: STATES, description: "Only jobs in this state" },
     { name: "type", type: "string", placeholder: "<type>", description: "Only this job type, like image_generation" },
     {
@@ -133,8 +143,9 @@ const wait: CommandSpec = {
   flags: WAIT_FLAGS,
   examples: ["opensume jobs wait job_7513b52d-3669-4ffe-b317-8b02000715eb -o ./out/"],
   run: async (parsed, ctx) => {
-    const id = await resolveJobId(ctx, parsed.args[0] as string);
     const timeoutMs = timeoutFlag(parsed.flags as Record<string, unknown>);
+    if (parsed.flags["no-download"] !== true) await checkWritable(parsed.flags.output as string | undefined, ctx.cwd);
+    const id = await resolveJobId(ctx, parsed.args[0] as string);
     const job = await ctx.client().getJob(id, ctx.signal);
     return followJob(ctx, {
       jobId: job.id,
@@ -170,7 +181,16 @@ const events: CommandSpec = {
   description: "With --follow, keeps printing new events until the job ends, like tail -f.",
   args: jobArg,
   flags: [
-    { name: "limit", short: "l", type: "number", placeholder: "<n>", description: "How many events" },
+    {
+      name: "limit",
+      short: "l",
+      type: "number",
+      min: 1,
+      max: 100,
+      integer: true,
+      placeholder: "<n>",
+      description: "How many events, 1–100",
+    },
     { name: "follow", short: "f", type: "boolean", description: "Keep printing new events until the job ends" },
   ],
   examples: ["opensume jobs events job_7513b52d", "opensume jobs logs 7513b52d --follow"],

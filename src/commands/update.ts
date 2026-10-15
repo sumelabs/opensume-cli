@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { chmod, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { networkReason } from "../api/client.ts";
 import type { Context } from "../context.ts";
 import type { CommandSpec } from "../lib/args.ts";
 import { CliError, ExitCode } from "../lib/errors.ts";
@@ -149,20 +150,39 @@ async function latestVersion(ctx: Context): Promise<string | undefined> {
       throw new CliError("Could not reach GitHub to check for updates.", { code: "network_error", cause });
     });
   if (res.status === 404) return undefined;
-  if (!res.ok)
-    throw new CliError(`GitHub answered ${res.status} while checking for updates.`, { code: "update_check_failed" });
-  const release = (await res.json()) as { tag_name?: string };
+  if (!res.ok) {
+    throw new CliError(`GitHub answered ${res.status} while checking for updates.`, {
+      code: "update_check_failed",
+      hint:
+        res.status === 403 || res.status === 429 ? "GitHub limits how often it is asked; try again later." : undefined,
+    });
+  }
+  const release = (await res.json().catch(() => undefined)) as { tag_name?: string } | undefined;
+  if (!release)
+    throw new CliError("GitHub's answer about the latest release was not JSON.", { code: "update_check_failed" });
   return release.tag_name?.replace(/^v/u, "");
 }
 
+/** One release file, whole. Any failure is explained, and nothing is replaced. */
 async function fetchBytes(ctx: Context, url: string): Promise<Buffer> {
-  const res = await ctx.fetch(url, {
-    headers: { "user-agent": ctx.userAgent },
-    redirect: "follow",
-    signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(300_000)]),
-  });
-  if (!res.ok) throw new CliError(`Download failed (${res.status}): ${url}`, { code: "download_failed" });
-  return Buffer.from(await res.arrayBuffer());
+  const name = url.split("/").pop();
+  try {
+    const res = await ctx.fetch(url, {
+      headers: { "user-agent": ctx.userAgent },
+      redirect: "follow",
+      signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(300_000)]),
+    });
+    if (!res.ok)
+      throw new CliError(`Downloading ${name} failed: GitHub answered ${res.status}.`, { code: "download_failed" });
+    return Buffer.from(await res.arrayBuffer());
+  } catch (cause) {
+    if (ctx.signal.aborted || cause instanceof CliError) throw cause;
+    throw new CliError(`Downloading ${name} failed (${networkReason(cause)}). Nothing was changed.`, {
+      code: "network_error",
+      hint: "Run `opensume update` again.",
+      cause,
+    });
+  }
 }
 
 /**
