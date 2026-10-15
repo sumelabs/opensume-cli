@@ -1,0 +1,58 @@
+name: Bug report
+description: Something in opensume does not work as it should
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please do **not** paste your API key; the request id is enough for us to find the call.
+        Security problems go through [SECURITY.md](https://github.com/sumelabs/opensume-cli/blob/main/SECURITY.md), not here.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, and what you got instead.
+      placeholder: |
+        I ran `opensume run seedance-2-mini "a paper boat" -d 4` and expected an mp4,
+        but it stopped with "…".
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and output
+      description: The full command and everything it printed. Re-run with `--verbose` to include the API calls and their request ids.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: opensume version
+      description: The output of `opensume version`.
+      placeholder: opensume 0.1.0 (bun 1.4.2, darwin arm64)
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - install.sh (macOS or Linux)
+        - install.ps1 (Windows)
+        - npm
+        - From source
+    validations:
+      required: true
+  - type: input
+    id: job
+    attributes:
+      label: Job id or request id
+      description: If the problem involves a job, its `job_…` id; if an API call failed, the `req_…` id from the error.
+      placeholder: job_7513b52d-3669-4ffe-b317-8b02000715eb
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: OS and terminal, network setup (proxy, VPN), or anything that might matter.

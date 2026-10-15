@@ -1,0 +1,57 @@
+{
+  "name": "opensume",
+  "version": "0.1.0",
+  "description": "Generate images and video from your terminal with the Sume Open API.",
+  "keywords": [
+    "sume",
+    "open.sume.com",
+    "cli",
+    "image-generation",
+    "video-generation",
+    "lipsync",
+    "generative-media",
+    "ai"
+  ],
+  "homepage": "https://github.com/sumelabs/opensume-cli#readme",
+  "bugs": {
+    "url": "https://github.com/sumelabs/opensume-cli/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sumelabs/opensume-cli.git"
+  },
+  "license": "MIT",
+  "author": "Sume Labs",
+  "type": "module",
+  "bin": {
+    "opensume": "dist/bin.js"
+  },
+  "files": [
+    "dist/**/*.js",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "build:binary": "node scripts/build-binaries.mjs",
+    "check": "npm run lint && npm run typecheck && npm test && npm run build",
+    "dev": "node --experimental-strip-types --no-warnings src/bin.ts",
+    "format": "biome format --write .",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "prepare": "npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3",
+    "vitest": "5.0.4"
+  }
+}

@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest a command, a flag, or a better way to do something
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The task, and where opensume gets in the way today.
+      placeholder: I generate 40 product shots a day and have to …
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would help
+      description: The command or flag you have in mind, with an example of how you would call it.
+      render: shell
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do instead today
+      description: Workarounds, scripts, or other tools you use for this.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Generating (run, estimate, upload)
+        - Models and prices
+        - Jobs
+        - Output, --json, scripting and agents
+        - Install and update
+        - Docs
+        - Something the API would need to change
+    validations:
+      required: true
