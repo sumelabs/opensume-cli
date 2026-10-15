@@ -10,11 +10,24 @@ import { CliError, ExitCode } from "./errors.ts";
 export const DEFAULT_BASE_URL = "https://api.open.sume.com";
 
 /**
- * Sume's shared development stack. It runs every main commit, has models in
- * preview, and has its own keys: open.sume.com makes keys for it while the
- * console is in preview.
+ * Open's development API: every main commit, with its own database and keys
+ * (made at open.dev.sume.com, for Sume staff). open.sume.com makes keys for
+ * the default host.
  */
-export const DEV_BASE_URL = "https://api.dev.sume.com";
+export const DEV_BASE_URL = "https://open-api-development.up.railway.app";
+
+/** sume.com's own API (the www stack). Open keys and Open routes are not there. */
+export const WRONG_BASE_URL = "https://api.sume.com";
+
+/** Where keys are made. */
+export const KEYS_URL = "https://open.sume.com/api-keys";
+
+/** How to install the CLI, one line per platform. */
+export const INSTALL = {
+  sh: "curl -fsSL https://raw.githubusercontent.com/sumelabs/opensume-cli/main/install.sh | sh",
+  powershell: "irm https://raw.githubusercontent.com/sumelabs/opensume-cli/main/install.ps1 | iex",
+  npm: "npm install -g https://github.com/sumelabs/opensume-cli/releases/latest/download/opensume.tgz",
+} as const;
 
 /** The Open API docs (models, jobs, errors, webhooks). */
 export const DOCS_URL = "https://open.sume.com/docs";

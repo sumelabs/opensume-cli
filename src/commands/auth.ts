@@ -2,11 +2,9 @@ import { SumeClient } from "../api/client.ts";
 import { ApiError } from "../api/errors.ts";
 import type { Context } from "../context.ts";
 import type { CommandSpec } from "../lib/args.ts";
-import { maskKey, otherHostHint, readConfig, removeConfig, writeConfig } from "../lib/config.ts";
+import { KEYS_URL, maskKey, otherHostHint, readConfig, removeConfig, writeConfig } from "../lib/config.ts";
 import { CliError, ExitCode, UsageError } from "../lib/errors.ts";
 import { readAllStdin, readSecret } from "../lib/prompt.ts";
-
-const KEYS_URL = "https://open.sume.com/api-keys";
 
 const login: CommandSpec = {
   name: "login",

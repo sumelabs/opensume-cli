@@ -1,8 +1,7 @@
-import { otherHostHint } from "../lib/config.ts";
+import { KEYS_URL, otherHostHint } from "../lib/config.ts";
 import { CliError, ExitCode } from "../lib/errors.ts";
 import type { ApiErrorBody } from "./types.ts";
 
-const KEYS_URL = "https://open.sume.com/api-keys";
 const BILLING_URL = "https://open.sume.com/billing";
 
 /** A non-2xx answer from the API, with its `error` envelope. */

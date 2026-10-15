@@ -2,7 +2,7 @@ import { stat } from "node:fs/promises";
 import { ApiError } from "../api/errors.ts";
 import type { Context } from "../context.ts";
 import type { CommandSpec } from "../lib/args.ts";
-import { maskKey, otherHostHint } from "../lib/config.ts";
+import { DEFAULT_BASE_URL, maskKey, otherHostHint, WRONG_BASE_URL } from "../lib/config.ts";
 import { ExitCode } from "../lib/errors.ts";
 import { VERSION } from "../version.ts";
 import { compareVersions, isStandaloneBinary, REPO } from "./update.ts";
@@ -116,13 +116,20 @@ async function runChecks(ctx: Context): Promise<Check[]> {
     // `open-v0.2.0` on Open production, `main` on the development stack.
     const branch = health.value.body.build?.source_branch;
     const surface = health.value.surface;
+    // api.sume.com answers /health too, but it is sume.com's API: no Open routes, no Open keys.
+    const wrongHost = new URL(client.baseUrl).host === new URL(WRONG_BASE_URL).host;
     checks.push({
       name: "API",
-      status: surface && surface !== "public" ? "warn" : "ok",
+      status: wrongHost ? "fail" : surface !== "public" ? "warn" : "ok",
       detail: `${client.baseUrl} · ${health.value.body.status ?? health.value.status}${sha ? ` · build ${sha}${branch ? ` (${branch})` : ""}` : ""}${surface ? ` · ${surface}` : ""} · ${health.ms}ms`,
-      ...(surface && surface !== "public"
-        ? { fix: "This host is not the public API; keys belong on the public one." }
-        : {}),
+      ...(wrongHost
+        ? {
+            fix: `This is sume.com's API, not Open's. Use ${DEFAULT_BASE_URL}: unset SUME_API_BASE_URL or pass --base-url ${DEFAULT_BASE_URL}.`,
+            exit: ExitCode.Usage,
+          }
+        : surface !== "public"
+          ? { fix: "This host does not say it serves the public Open API; keys belong on the public one." }
+          : {}),
     });
   } else {
     checks.push({

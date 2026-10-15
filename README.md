@@ -23,11 +23,12 @@
 - **Know the price first.** `opensume estimate` is free and needs no key. `--max-usd` refuses anything over budget.
 - **Local files just work.** Pass `--image ./photo.png`; it is uploaded for you.
 - **Safe to retry.** Submits carry an idempotency key, the CLI's own retries reuse it, and an error after a submit names the key or the job, so a retry never pays twice.
-- **Made for scripts and agents.** `--json` everywhere, documented exit codes, a machine-readable command list, and an [agent skill](skills/opensume/SKILL.md).
+- **Made for scripts and agents.** `opensume agent` prints the whole setup on one page for an agent to follow. `--json` everywhere, documented exit codes, a machine-readable command list, and an [agent skill](skills/opensume/SKILL.md).
+- **Every field is a flag.** Anything a model's endpoint takes can be passed by name: `--rendering_speed fast`, `--captions.style glass`.
 - **One self-contained binary.** No runtime to install, no dependencies, no telemetry, no background update checks.
 
 > [!NOTE]
-> The CLI calls Open's production API, `https://api.open.sume.com`. Sume's development API, `https://api.dev.sume.com`, has models in preview and its own keys; see [API hosts](#api-hosts). The [API docs](https://open.sume.com/docs) are on open.sume.com.
+> The CLI calls Open's production API, `https://api.open.sume.com`, with keys from [open.sume.com](https://open.sume.com/api-keys). `https://api.sume.com` is sume.com's API, not Open's; see [API hosts](#api-hosts). The [API docs](https://open.sume.com/docs) are on open.sume.com.
 
 ## Contents
 
@@ -75,6 +76,8 @@ Check it with `opensume --version`.
 
 ## Quick start
 
+**Setting up an agent?** Run `opensume agent` and give it the page: the install line, the API host, how to pass the key, and the five commands it needs. `opensume agent --write AGENTS.md` puts the same page into your project's AGENTS.md.
+
 **1. Get a key.** Sign in at [open.sume.com](https://open.sume.com), open **API keys**, and create one. Then save it:
 
 ```sh
@@ -82,8 +85,6 @@ opensume auth login        # paste the key; it is checked, then stored for your 
 ```
 
 Or export it for the current shell instead: `export SUME_API_KEY="sume_live_..."`.
-
-While open.sume.com is in preview, the keys it makes are for the development API. Save one with `opensume auth login --base-url https://api.dev.sume.com`, and the CLI remembers the host with the key.
 
 **2. Make an image.** This one costs $0.012:
 
@@ -143,6 +144,7 @@ Try it
 | [`models`](#models) | List models and prices, or show one |
 | [`schema`](#schema) | Every input a model takes: type, limits, choices, flag |
 | [`jobs`](#jobs) | List, wait for, inspect, follow and cancel jobs |
+| [`agent`](#agent) | One page for an agent: install, API host, key, first commands |
 | [`auth`](#auth) | Save, check or forget your key |
 | [`doctor`](#doctor) | Check the install, the key and the connection |
 | `completion` | Shell completion for bash, zsh and fish |
@@ -169,8 +171,8 @@ opensume run seedance-2-mini "a paper boat drifting down a rain gutter" -d 4 -r 
 # Lip-sync a clip to speech
 opensume run veed-lipsync --video talk.mp4 --audio line.wav -d 6
 
-# Burn captions into a clip (fields without a flag go through --set)
-opensume run veed-subtitles --video clip.mp4 -d 12 --set captions.style=glass
+# Burn captions into a clip (every field is a flag; dots reach nested ones)
+opensume run veed-subtitles --video clip.mp4 -d 12 --captions.style glass
 
 # Submit now, collect later (a job id's first 8 characters are enough)
 opensume run kling-3 "a red kite over a beach" -d 5 --no-wait
@@ -183,11 +185,11 @@ opensume run seedance-2-mini "a paper boat" -d 4 --logs -o "out/{model}-{job}.{e
 | Flags | |
 |---|---|
 | **Inputs** | `-p, --prompt` · `-i, --image` (repeatable) · `--end-image` · `--video` · `--audio` · `--ref-image`, `--ref-video`, `--ref-audio` (repeatable) · `--mask`. Each takes a public https URL or a local file. |
-| **Settings** | `-a, --aspect-ratio` · `-r, --resolution` · `-d, --duration` · `-q, --quality` · `-n, --num-images` · `--format` · `--size` · `--background` · `--[no-]generate-audio` · `--set key=value` for any other field (JSON values, `a.b` nesting, `key[]=` to append) · `--input body.json` (or `-` for stdin) |
+| **Settings** | `-a, --aspect-ratio` · `-r, --resolution` · `-d, --duration` · `-q, --quality` · `-n, --num-images` · `--format` · `--size` · `--background` · `--[no-]generate-audio` · `--<field> <value>` for any other field in `opensume schema <model>` (`--rendering_speed fast`, `--captions.style glass`, `--no-<field>` for false) · `--set key=value` does the same (JSON values, `a.b` nesting, `key[]=` to append) · `--input body.json` (or `-` for stdin) |
 | **Output** | `-o, --output <file, dir/ or template>` · `--logs` (stream the job's events) · `--no-download` (print URLs) · `--all-files` (also save intermediate files, like a video's poster frame) · `--timeout 20m` · `--open` |
 | **Submit** | `--max-usd <dollars>` · `--dry-run` (print the request and price) · `--no-wait` · `--webhook <url>` · `--idempotency-key <key>` |
 
-A flag that a model's endpoint does not take is refused before anything is sent: `--duration` on an image model, for example. A `--set` field the endpoint does not have gets a warning with a suggestion (`qualty` → `quality`), and `--set` values follow the field's type, so `--set prompt=1984` stays text. Ctrl-C stops waiting, not the job: the CLI prints the job id, and `opensume jobs wait <id>` picks it up later.
+A flag that a model's endpoint does not take is refused before anything is sent: `--duration` on an image model, for example. A `--<field>` flag the endpoint does not have is refused with the closest name (`--renderng_speed` → `--rendering_speed`); a `--set` field gets a warning with a suggestion (`qualty` → `quality`). Values follow the field's type, so `--prompt 1984` stays text and `--num_images 2` is a number. Ctrl-C stops waiting, not the job: the CLI prints the job id, and `opensume jobs wait <id>` picks it up later.
 
 `-o` takes a file name, a directory (ending in `/`), or a template with `{model}`, `{job}` (8 characters), `{job_id}`, `{index}`, `{ext}` and `{type}`. Named files and templates overwrite; the default names never do.
 
@@ -249,6 +251,16 @@ opensume jobs cancel <id>           # only before generation starts; refunded
 
 `<id>` is a full job id or a unique start of one, such as the 8 characters in a file name (`gpt-image-2-0ae33f04.png` → `0ae33f04`).
 
+### agent
+
+```sh
+opensume agent                      # one page, as Markdown: install, API host, key, first commands
+opensume agent --json               # the same, as fields (install.sh, default_base_url, key.set, …)
+opensume agent --write AGENTS.md    # add the page to a file between markers; rerun to refresh it
+```
+
+The page is what an agent needs and nothing else: the one-line install for each platform, the base URL (`https://api.open.sume.com`) and the host to avoid (`https://api.sume.com`), how to pass the key without printing it (`SUME_API_KEY`, or `Authorization: Bearer` for raw HTTP), the five commands that do the work, `--max-usd`, and the exit codes. It ends with what this machine would use: the version, the API host and whether a key is set. It makes no network calls.
+
 ### auth
 
 ```sh
@@ -262,7 +274,7 @@ opensume auth logout                                 # forget the saved key
 
 ```console
 $ opensume doctor
-✓ CLI     opensume 0.2.4 (bun 1.4.2, darwin arm64, standalone)
+✓ CLI     opensume 0.3.0 (bun 1.4.2, darwin arm64, standalone)
 ✓ Update  latest release
 ✓ Config  ~/.config/opensume/config.json (mode 600)
 ✓ API     https://api.open.sume.com · ok · build 5fadc7571 (open-v0.2.0) · public · 197ms
@@ -308,6 +320,8 @@ $ opensume run gpt-image-2 "a red kite over a beach, flat illustration" -q low -
 
 Without `--json`, results go to stdout and everything else (progress, notes, errors) to stderr, so `opensume run … | xargs open` gets just the file paths.
 
+**`OPENSUME_OUTPUT=json`** makes every command print JSON as if it had `--json`, for an agent harness that cannot add a flag. `OPENSUME_OUTPUT=auto` does so only when stdout is not a terminal. Completion scripts stay shell code either way.
+
 **Exit codes** are stable:
 
 | Code | Meaning |
@@ -340,6 +354,7 @@ curl -fsSL https://raw.githubusercontent.com/sumelabs/opensume-cli/main/skills/o
 |---|---|---|---|
 | API key | `--api-key` | `SUME_API_KEY` | `opensume auth login` |
 | API host | `--base-url` | `SUME_API_BASE_URL` | `opensume auth login --base-url …` |
+| Output | `--json` | `OPENSUME_OUTPUT=json` (or `auto`) | |
 
 A flag beats the environment, which beats the config file. The config file is `~/.config/opensume/config.json` (`$XDG_CONFIG_HOME` is honored, `%APPDATA%\opensume` on Windows, or `$OPENSUME_CONFIG_DIR`). It is created readable by your user only. The key in it is not encrypted, so treat it like an SSH key, or use `SUME_API_KEY` instead.
 
@@ -349,10 +364,11 @@ Color follows the terminal; `NO_COLOR=1` or `--no-color` turns it off and `FORCE
 
 | Host | What it is | Keys |
 |---|---|---|
-| `https://api.open.sume.com` (default) | Open's production API, released as `open-v*` tags | Open production keys |
-| `https://api.dev.sume.com` | Sume's development API: every new commit, and models in preview (62 models against production's 52 today) | open.sume.com keys, while it is in preview |
+| `https://api.open.sume.com` (default) | Open's production API, released as `open-v*` tags | [open.sume.com → API keys](https://open.sume.com/api-keys) |
+| `https://open-api-development.up.railway.app` | Open's development API: every new commit, same models | open.dev.sume.com (Sume staff) |
+| `https://api.sume.com` | **Not Open.** sume.com's own API | Open keys do not work there |
 
-Both serve the same Open API. A key works only on the host it was made for. On the other host it is refused like a wrong key, and the error names the other host to try. `opensume doctor` shows which host and release you are on. `api.sume.com` is sume.com's API, not Open's; do not point the CLI at it.
+A key works only on the host it was made for. On another host it is refused like a wrong key, and the error names the other host to try. `opensume doctor` shows which host and release you are on, and fails on `api.sume.com`.
 
 **Shell completion** (commands, flags and model ids):
 

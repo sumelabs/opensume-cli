@@ -27,6 +27,7 @@ export const run: CommandSpec = {
   description:
     "Submits a job to the model, waits for it, and saves the result in the current directory (or where -o says). " +
     "Media flags take a public https URL or a local file; local files are uploaded to Sume first. " +
+    "Any field in `opensume schema <model>` is also a flag by its name, like --rendering_speed fast. " +
     "Every submit carries an Idempotency-Key, so a retried submit never pays twice.",
   args: [
     {
@@ -74,7 +75,7 @@ export const run: CommandSpec = {
     'opensume run seedance-2-mini "a paper boat drifting down a rain gutter" -d 4 -r 480p -o boat.mp4',
     'opensume run gpt-image-2 "the same scene at night" --image ./cup.png',
     "opensume run veed-lipsync --video ./talk.mp4 --audio ./line.wav -d 6",
-    "opensume run veed-subtitles --video ./clip.mp4 -d 12 --set captions.style=glass",
+    "opensume run veed-subtitles --video ./clip.mp4 -d 12 --captions.style glass",
     'opensume run gpt-image-2 "a red kite" --max-usd 0.05 --json | jq -r ".artifacts[0].path"',
   ],
   run: runCommand,

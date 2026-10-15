@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { agentMarkdown } from "../src/commands/agent.ts";
 import { MockApi, PNG, TEST_KEY } from "./helpers/mock-api.ts";
 import { runCli, tempDir } from "./helpers/run-cli.ts";
 
@@ -289,11 +290,10 @@ describe("run", () => {
     expect(res.stderr).toContain("Did you mean gpt-image-2?");
   });
 
-  it("points a model the routers know but this host lacks at the development API", async () => {
+  it("names the host when a model is not in its catalog", async () => {
     const res = await cli(["run", "veo-3.1", "a cup", "-d", "4"]);
     expect(res.code).toBe(4);
     expect(res.stderr).toMatch(/No model "veo-3\.1" on (127\.0\.0\.1|localhost):\d+\./u);
-    expect(res.stderr).toContain("--base-url https://api.dev.sume.com");
   });
 
   it("reports errors as JSON in --json mode", async () => {
@@ -480,6 +480,65 @@ describe("fal-level features", () => {
     expect((await cli(["run", "gpt-image-2", "a cup", "--set", "num_images=two", "--dry-run"])).code).toBe(2);
   });
 
+  it("takes any request field as a flag, typed by the schema", async () => {
+    const res = await cli([
+      "run",
+      "-o",
+      "cup.png",
+      "gpt-image-2",
+      "a cup",
+      "--rendering_speed",
+      "fast",
+      "--num_images=2",
+      "--model-params",
+      '{"seed":7}',
+      "--dry-run",
+      "--json",
+    ]);
+    expect(res.code).toBe(0);
+    const body = res.json<{ body: Record<string, unknown> }>().body;
+    expect(body).toMatchObject({ rendering_speed: "fast", num_images: 2, model_params: { seed: 7 } });
+
+    const video = await cli([
+      "estimate",
+      "seedance-2-mini",
+      "a boat",
+      "--captions.style",
+      "glass",
+      "--no-generate_audio",
+      "--json",
+    ]);
+    expect(video.code).toBe(0);
+    const priced = api.requests.filter((r) => r.path === "/v1/open/estimate").pop()?.body as {
+      input: Record<string, unknown>;
+    };
+    expect(priced.input).toMatchObject({ captions: { style: "glass" }, generate_audio: false });
+
+    // A true/false field alone means true, and leaves the prompt after it alone.
+    expect((await cli(["estimate", "seedance-2-mini", "--generate_audio", "a boat", "--json"])).code).toBe(0);
+    const switched = api.requests.filter((r) => r.path === "/v1/open/estimate").pop()?.body as {
+      input: Record<string, unknown>;
+    };
+    expect(switched.input).toMatchObject({ prompt: "a boat", generate_audio: true });
+
+    const typo = await cli(["run", "gpt-image-2", "a cup", "--renderng_speed", "fast"]);
+    expect(typo.code).toBe(2);
+    expect(typo.stderr).toContain("Did you mean --rendering_speed?");
+    expect((await cli(["run", "gpt-image-2", "a cup", "--num_images", "two", "--dry-run"])).stderr).toContain(
+      'num_images takes a whole number (got "two")',
+    );
+  });
+
+  it("prints JSON everywhere with OPENSUME_OUTPUT=json, but never for completion scripts", async () => {
+    const env = { OPENSUME_OUTPUT: "json" };
+    expect(Array.isArray((await cli(["models"], { key: null, env })).json())).toBe(true);
+    const failed = await cli(["jobs", "get"], { env });
+    expect(failed.code).toBe(2);
+    expect(failed.json<{ error: { code: string } }>().error.code).toBe("usage_error");
+    expect((await cli(["completion", "bash"], { env })).stdout).toContain("# opensume completion for bash");
+    expect((await cli(["models"], { key: null, env: { OPENSUME_OUTPUT: "yaml" } })).code).toBe(2);
+  });
+
   it("streams job events with --logs, and adds them to --json", async () => {
     const text = await cli(["run", "gpt-image-2", "a cup", "--logs", "--no-download"]);
     expect(text.code).toBe(0);
@@ -535,5 +594,75 @@ describe("fal-level features", () => {
     const api = ok.json<{ checks: { name: string; detail: string }[] }>().checks.find((c) => c.name === "API");
     expect(api?.detail).toContain("build 012345678 (open-v9.9.9)");
     expect((await cli(["doctor"], { key: null })).code).toBe(3);
+  });
+});
+
+describe("agent", () => {
+  it("prints the install, the API host, the wrong host and the key setup", async () => {
+    const res = await cli(["agent"], { key: null });
+    expect(res.code).toBe(0);
+    for (const text of [
+      "curl -fsSL https://raw.githubusercontent.com/sumelabs/opensume-cli/main/install.sh | sh",
+      "Base URL: `https://api.open.sume.com`",
+      "Not `https://api.sume.com`",
+      "SUME_API_KEY",
+      "Authorization: Bearer",
+      "--max-usd",
+      "Key: none",
+    ]) {
+      expect(res.stdout).toContain(text);
+    }
+    const json = (await cli(["agent", "--json"])).json<{
+      install: { sh: string };
+      default_base_url: string;
+      wrong_base_url: string;
+      key: { set: boolean; source: string };
+    }>();
+    expect(json).toMatchObject({
+      default_base_url: "https://api.open.sume.com",
+      wrong_base_url: "https://api.sume.com",
+      key: { set: true, source: "env" },
+    });
+    expect(JSON.stringify(json)).not.toContain(TEST_KEY);
+    expect((await cli(["quickstart"], { key: null })).stdout).toContain("## opensume");
+  });
+
+  it("writes one marked block into an AGENTS.md, and replaces it on the next run", async () => {
+    const cwd = tempDir();
+    const file = join(cwd, "AGENTS.md");
+    writeFileSync(file, "# My project\n\nRules.\n");
+    expect((await cli(["agent", "--write", "AGENTS.md", "--json"], { cwd })).json()).toMatchObject({
+      action: "added",
+    });
+    const once = readFileSync(file, "utf8");
+    expect(once.startsWith("# My project\n\nRules.\n\n<!-- BEGIN opensume -->\n## opensume")).toBe(true);
+    expect((await cli(["agent", "--write", "AGENTS.md", "--json"], { cwd })).json()).toMatchObject({
+      action: "unchanged",
+    });
+    writeFileSync(file, once.replace("Images, video", "Old text"));
+    expect((await cli(["agent", "--write", "AGENTS.md", "--json"], { cwd })).json()).toMatchObject({
+      action: "updated",
+    });
+    expect(readFileSync(file, "utf8")).toBe(once);
+    writeFileSync(join(cwd, "broken.md"), "<!-- BEGIN opensume -->\nno end\n");
+    expect((await cli(["agent", "--write", "broken.md"], { cwd })).code).toBe(2);
+  });
+
+  it("tells a person with no key where to start, and lists install lines in --help --json", async () => {
+    expect((await cli(["--help"], { key: null })).stdout).toContain(
+      "No key yet: make one at https://open.sume.com/api-keys",
+    );
+    expect((await cli(["--help"])).stdout).not.toContain("No key yet");
+    const manifest = (await cli(["--help", "--json"], { key: null })).json<{ install: { sh: string }; env: object }>();
+    expect(manifest.install.sh).toContain("install.sh");
+    expect(manifest.env).toHaveProperty("OPENSUME_OUTPUT");
+  });
+});
+
+describe("AGENTS.md", () => {
+  it("carries the page `opensume agent` prints, between its markers", () => {
+    const text = readFileSync(join(import.meta.dirname, "..", "AGENTS.md"), "utf8");
+    const block = text.slice(text.indexOf("<!-- BEGIN opensume -->\n") + 24, text.indexOf("\n<!-- END opensume -->"));
+    expect(block).toBe(agentMarkdown());
   });
 });

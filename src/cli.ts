@@ -1,4 +1,5 @@
 import { ApiError } from "./api/errors.ts";
+import { agent } from "./commands/agent.ts";
 import { auth } from "./commands/auth.ts";
 import { complete } from "./commands/complete.ts";
 import { completionCommand } from "./commands/completion.ts";
@@ -13,8 +14,9 @@ import { upload } from "./commands/upload.ts";
 import { version, versionInfo } from "./commands/version.ts";
 import { createContext } from "./context.ts";
 import { type CommandSpec, findSubcommand, type Parsed, parse } from "./lib/args.ts";
-import { DEFAULT_BASE_URL, DOCS_URL, resolveSettings } from "./lib/config.ts";
+import { DEFAULT_BASE_URL, DOCS_URL, INSTALL, KEYS_URL, resolveSettings, WRONG_BASE_URL } from "./lib/config.ts";
 import { CliError, ExitCode, UsageError } from "./lib/errors.ts";
+import { expandFieldFlags } from "./lib/field-flags.ts";
 import { renderHelp } from "./lib/help.ts";
 import { colorEnabled, type Stream, Ui } from "./lib/ui.ts";
 import { VERSION } from "./version.ts";
@@ -40,6 +42,44 @@ export const GLOBAL_FLAGS = [
   { name: "version", short: "v", type: "boolean", description: "Print the version" },
 ] as const satisfies CommandSpec["flags"];
 
+/** Under the root help: the next step for someone with no key, and the agent page. */
+function startHere(env: NodeJS.ProcessEnv): string[] {
+  let hasKey = Boolean(env.SUME_API_KEY);
+  try {
+    hasKey ||= Boolean(resolveSettings({}, env).apiKey);
+  } catch {
+    // An unreadable config is doctor's business, not help's.
+  }
+  return [
+    "",
+    ...(hasKey
+      ? []
+      : [`No key yet: make one at ${KEYS_URL}, then export SUME_API_KEY or run \`opensume auth login\`.`]),
+    "Setting up an agent? `opensume agent` prints the install, the API host and the key setup on one page.",
+  ];
+}
+
+const GLOBAL_VALUE_FLAGS = GLOBAL_FLAGS.filter((f) => f.type !== "boolean").map((f) => `--${f.name}`);
+
+/** `run` and `estimate` take any request field as a flag (`--seed 7`). */
+function fieldCommand(name: string) {
+  const command = [run, estimate].find((c) => c.name === name || c.aliases?.includes(name));
+  return command ? { name: command.name, flags: [...GLOBAL_FLAGS, ...(command.flags ?? [])] } : undefined;
+}
+
+/**
+ * `OPENSUME_OUTPUT`: `json` makes every command print JSON, as if each had
+ * --json; `auto` does so when stdout is not a terminal; `text` (the
+ * default) never does. For agents whose harness cannot add a flag.
+ */
+function jsonFromEnv(env: NodeJS.ProcessEnv, stdout: Stream): boolean {
+  const mode = (env.OPENSUME_OUTPUT ?? "").trim().toLowerCase();
+  if (mode === "" || mode === "text") return false;
+  if (mode === "json") return true;
+  if (mode === "auto") return !stdout.isTTY;
+  throw new UsageError(`OPENSUME_OUTPUT must be json, auto or text (got "${env.OPENSUME_OUTPUT}").`);
+}
+
 const help: CommandSpec = {
   name: "help",
   group: "Setup",
@@ -62,6 +102,7 @@ export const root: CommandSpec = {
     models,
     schema,
     jobs,
+    agent,
     auth,
     doctor,
     completionCommand(() => root),
@@ -88,7 +129,7 @@ export async function main(options: MainOptions): Promise<number> {
   const env = options.env ?? process.env;
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
-  const wantsJson = options.argv.includes("--json");
+  let wantsJson = options.argv.includes("--json");
   // Color only when both streams are terminals, so no escape code ever lands
   // in a pipe or a file (results go to stdout, progress to stderr).
   const color = (off: boolean) =>
@@ -104,13 +145,17 @@ export async function main(options: MainOptions): Promise<number> {
   });
 
   let parsed: Parsed;
+  let envJson: boolean;
   try {
-    parsed = parse(root, options.argv);
+    envJson = jsonFromEnv(env, stdout);
+    wantsJson ||= envJson;
+    parsed = parse(root, expandFieldFlags(options.argv, fieldCommand, vendoredRouter, GLOBAL_VALUE_FLAGS));
   } catch (error) {
     return report(ui, error, wantsJson);
   }
   const flags = parsed.flags;
-  const json = flags.json === true;
+  // A completion script is shell code, never JSON, whatever OPENSUME_OUTPUT says.
+  const json = flags.json === true || (envJson && !["completion", "__complete"].includes(parsed.path[0] ?? ""));
   const quiet = flags.quiet === true || json;
   ui = new Ui({
     stdout,
@@ -132,6 +177,7 @@ export async function main(options: MainOptions): Promise<number> {
       const chain = parsed.command === help ? chainFor(parsed.args) : chainFor(parsed.path);
       if (json) ui.json(manifest(chain[chain.length - 1] === root ? undefined : chain));
       else ui.out(renderHelp(chain, ui.c, ui.width).trimEnd());
+      if (!json && chain.length === 1) for (const line of startHere(env)) ui.out(ui.c.dim(line));
       // `run <model> --help` also shows what that model takes, like `opensume schema <model>`.
       const modelId = parsed.command !== help ? parsed.args[0] : undefined;
       const router =
@@ -321,10 +367,13 @@ export function manifest(chain?: readonly CommandSpec[]) {
     name: "opensume",
     version: VERSION,
     description: root.summary,
-    api: { default_base_url: DEFAULT_BASE_URL, docs: DOCS_URL },
+    install: INSTALL,
+    api: { default_base_url: DEFAULT_BASE_URL, wrong_base_url: WRONG_BASE_URL, docs: DOCS_URL, keys: KEYS_URL },
     env: {
-      SUME_API_KEY: "API key (open.sume.com → API keys)",
-      SUME_API_BASE_URL: `API host, default ${DEFAULT_BASE_URL}`,
+      SUME_API_KEY: `API key, made at ${KEYS_URL}. Sent as Authorization: Bearer.`,
+      SUME_API_BASE_URL: `API host, default ${DEFAULT_BASE_URL} (never ${WRONG_BASE_URL})`,
+      OPENSUME_OUTPUT:
+        "json: every command prints JSON, as with --json; auto: when stdout is not a terminal; text (default)",
       OPENSUME_CONFIG_DIR: "Where the saved key lives",
       NO_COLOR: "Disable color",
     },

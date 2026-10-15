@@ -15,7 +15,7 @@ export const schema: CommandSpec = {
   summary: "Show every input a model takes: type, limits, choices and flag",
   description:
     "Lists the request fields of the model's endpoint, taken from the API's OpenAPI document when this CLI was " +
-    "released, with the flag that sets each one. Fields without a flag go through --set field=value. The model's " +
+    "released, with the flag that sets each one. Every field is a flag (`--seed 7`), and --set field=value works too. The model's " +
     "own limits and prices are in `opensume models <id>`.",
   args: [{ name: "model", required: true, complete: "models", description: "A model id from `opensume models`" }],
   flags: [
@@ -54,9 +54,7 @@ async function schemaCommand(parsed: Parsed, ctx: Context): Promise<number> {
       router,
       endpoint,
       required: required.filter((r) => r !== "model"),
-      fields: Object.fromEntries(
-        visible.map(([name, f]) => [name, { ...f, flag: FIELD_FLAGS[name] ?? `--set ${name}=…` }]),
-      ),
+      fields: Object.fromEntries(visible.map(([name, f]) => [name, { ...f, flag: FIELD_FLAGS[name] ?? `--${name}` }])),
     });
     return ExitCode.Ok;
   }
@@ -86,7 +84,7 @@ export function renderInputs(
     rows.push({
       name: `${name}${required.includes(name) ? " *" : ""}`,
       type: fieldType(field),
-      flag: FIELD_FLAGS[name] ?? "--set",
+      flag: FIELD_FLAGS[name] ?? `--${name}`,
       note: field.description ?? "",
       field,
     });
@@ -94,7 +92,7 @@ export function renderInputs(
       rows.push({
         name: `  ${name}.${sub}${field.required?.includes(sub) ? " *" : ""}`,
         type: fieldType(inner),
-        flag: "--set",
+        flag: `--${name}.${sub}`,
         note: inner.description ?? "",
         field: inner,
       });
@@ -128,7 +126,7 @@ export function renderInputs(
   out.push("");
   out.push(
     c.dim(
-      "* required. Fields without their own flag go through --set field=value (dots for nested: captions.style=glass).",
+      "* required. Every field is a flag: --field value, dots for nested (--captions.style glass). --set field=value works too.",
     ),
   );
   if (!options.full)

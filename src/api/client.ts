@@ -308,7 +308,7 @@ export class SumeClient {
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 /**
- * `https://api.dev.sume.com/v1/` → `https://api.dev.sume.com`. Plain http is
+ * `https://api.open.sume.com/v1/` → `https://api.open.sume.com`. Plain http is
  * allowed for local test servers only: anywhere else it would send the key
  * across the network in the clear.
  */

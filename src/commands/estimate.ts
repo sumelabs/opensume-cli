@@ -23,7 +23,7 @@ export const estimate: CommandSpec = {
   examples: [
     "opensume estimate gpt-image-2 -q high",
     "opensume estimate seedance-2-mini -d 8 -r 720p",
-    "opensume estimate veed-subtitles --video clip.mp4 -d 45 --set captions.style=glass",
+    "opensume estimate veed-subtitles --video clip.mp4 -d 45 --captions.style glass",
   ],
   run: estimateCommand,
 };

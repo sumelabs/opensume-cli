@@ -9,7 +9,9 @@ description: Generate images, video, lip-sync and captions with the Sume Open AP
 
 ## Before you start
 
-- Check the key: `opensume auth status --json`. If `valid` is false, read `error.hint` first: a key works only on the API host it was made for, so a good key on the wrong host looks wrong. The default host is Open production (`https://api.open.sume.com`); keys from open.sume.com are for `https://api.dev.sume.com` while it is in preview, and `SUME_API_BASE_URL` picks the host. Otherwise ask the user to create a key at https://open.sume.com/api-keys and export it as `SUME_API_KEY`. Never ask them to paste it into the chat, and never print it.
+- Not installed? `curl -fsSL https://raw.githubusercontent.com/sumelabs/opensume-cli/main/install.sh | sh`. Then `opensume agent` prints the install, API host and key setup on one page.
+- Check the key: `opensume auth status --json`. If `valid` is false, read `error.hint`: a key works only on the API host it was made for. The default host, `https://api.open.sume.com`, takes keys from https://open.sume.com/api-keys; never point the CLI at `https://api.sume.com` (sume.com's API, not Open's). Otherwise ask the user to create a key there and export it as `SUME_API_KEY`. Never ask them to paste it into the chat, and never print it.
+- Set `OPENSUME_OUTPUT=json` if you cannot add `--json` to every command.
 - Generation costs real money from the user's open.sume.com balance. Pricing (`estimate`) and listing (`models`) are free.
 
 ## Pick a model
@@ -20,7 +22,7 @@ opensume models --kind video --json         # kinds: image, video, lipsync, capt
 opensume models seedance-2-mini --json      # one model: inputs, limits, price options, notes
 ```
 
-Read a model's `capabilities` and `constraints` before building a request: they list the allowed resolutions, durations, aspect ratios and required inputs. `opensume schema <model> --json` lists every request field with its type, limits and the flag that sets it; fields without a flag go through `--set field=value`.
+Read a model's `capabilities` and `constraints` before building a request: they list the allowed resolutions, durations, aspect ratios and required inputs. `opensume schema <model> --json` lists every request field with its type, limits and the flag that sets it. Every field is also a flag by its own name: `--rendering_speed fast`, `--captions.style glass`.
 
 Check the setup first when something fails: `opensume doctor --json` checks the key, the API host and the media host.
 
@@ -35,7 +37,7 @@ opensume run seedance-2-mini "a paper boat drifting" -d 4 -r 480p --max-usd 0.50
 - For a large or unusual spend, tell the user the estimate and wait for a yes.
 - `run --json` prints `{"job": {...}, "usd": "...", "artifacts": [{"path": "...", "url": "...", "content_type": "..."}]}`. The files are already saved at `path`.
 - Local files work wherever a URL does (`--image ./photo.png`, `--video ./clip.mp4`, `--audio ./line.wav`). They are uploaded first.
-- Fields without their own flag go through `--set key=value`, for example `--set captions.style=glass`.
+- Any other field goes by its name, for example `--captions.style glass`; `--set captions.style=glass` does the same.
 
 ## Long jobs
 

@@ -8,7 +8,7 @@ export function routerSchema(router: Router): RouterSchema {
   return ROUTER_SCHEMAS[router];
 }
 
-/** The CLI flag that fills each request field; anything else goes through `--set`. */
+/** The named flag that fills each request field; every other field is `--<field>` (or `--set`). */
 export const FIELD_FLAGS: Readonly<Record<string, string>> = {
   prompt: "[prompt], -p",
   image_urls: "-i, --image",
@@ -82,16 +82,14 @@ export function typedValue(
   if (types.length === 1 && (types[0] === "integer" || types[0] === "number")) {
     const value = Number(trimmed);
     if (trimmed === "" || !Number.isFinite(value) || (types[0] === "integer" && !Number.isInteger(value))) {
-      throw new UsageError(
-        `--set ${key} takes ${types[0] === "integer" ? "a whole number" : "a number"} (got "${raw}").`,
-      );
+      throw new UsageError(`${key} takes ${types[0] === "integer" ? "a whole number" : "a number"} (got "${raw}").`);
     }
     return value;
   }
   if (types.length === 1 && types[0] === "boolean") {
     if (/^(true|yes|1)$/iu.test(trimmed)) return true;
     if (/^(false|no|0)$/iu.test(trimmed)) return false;
-    throw new UsageError(`--set ${key} takes true or false (got "${raw}").`);
+    throw new UsageError(`${key} takes true or false (got "${raw}").`);
   }
   // Objects, arrays, or a string-or-object field like image_size: JSON when it is JSON.
   return guess(raw);

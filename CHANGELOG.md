@@ -4,6 +4,25 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-15
+
+From reading genmedia (fal's CLI) side by side, and from Open's console moving to production.
+
+### Added
+
+- `opensume agent` (also `quickstart`): one page to hand a coding agent. It has the install line for each platform, the API host and the one to avoid (`api.sume.com`), how to pass the key, the five commands that do the work, `--max-usd` and the exit codes. It prints Markdown by default and fields with `--json`. `--write <file>` keeps the page in a marked block of an AGENTS.md; run it again to refresh the block. It makes no network calls.
+- Every request field is a flag: `--rendering_speed fast`, `--captions.style glass`, `--model_params '{"seed":7}'`, and `--no-<field>` for false. Values are typed by the schema like `--set`, and a near miss gets the closest flag or field. `schema` and `run <model> --help` show each field's flag.
+- `OPENSUME_OUTPUT=json` makes every command print JSON without `--json`; `auto` does so only when stdout is not a terminal. Completion scripts are never JSON.
+- `--help --json` lists the install lines, the wrong host and `OPENSUME_OUTPUT`. The root help tells someone with no key where to make one, and points agents at `opensume agent`.
+- `doctor` fails when the API host is `api.sume.com`, sume.com's own API.
+
+### Changed
+
+- open.sume.com is now Open's production console, so its keys work on the default host with no setup. The development host the CLI names is now Open's own, `https://open-api-development.up.railway.app` (keys from open.dev.sume.com). `api.dev.sume.com` is sume.com's development API.
+- The 0.2.4 hint that sent unknown models to the development API is gone, because Open's development API lists the same models as production.
+- Type errors name the field without `--set`, for example `num_images takes a whole number`.
+- AGENTS.md now starts with the page `opensume agent` prints, and a test keeps the two equal.
+
 ## [0.2.4] - 2026-10-15
 
 ### Fixed
@@ -84,7 +103,8 @@ The first release: every model on open.sume.com, from the terminal.
 - Standalone binaries for macOS (arm64, x64), Linux (x64, arm64; glibc and musl) and Windows x64, built to run on CPUs without AVX2. Checksum-verified `install.sh` and `install.ps1`, an npm tarball on each release, and `opensume update`.
 - An agent skill in `skills/opensume`.
 
-[Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/sumelabs/opensume-cli/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/sumelabs/opensume-cli/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/sumelabs/opensume-cli/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/sumelabs/opensume-cli/compare/v0.2.1...v0.2.2
