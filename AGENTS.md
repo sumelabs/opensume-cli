@@ -63,4 +63,4 @@ npm run sync-schema    # refresh src/generated/router-schemas.ts from the defaul
 
 Rules: zero runtime dependencies; erasable TypeScript, local imports end in `.ts`; all output through `ctx.ui` (results to stdout, everything else to stderr); `--json` prints exactly one document, errors included; exit codes in `src/lib/errors.ts` never change meaning; never print a key or a presigned URL. A user-visible change gets a CHANGELOG line under **Unreleased** and README updates. Bump the version in `package.json` and `src/version.ts`.
 
-For a real API check, prefer free calls (`models`, `estimate`, `run … --dry-run`). A paid check uses the cheapest model that proves the point (`gpt-image-2 -q low`, $0.012) with `--max-usd`. If you change the page in `src/commands/agent.ts`, rerun `npm run dev -- agent --write AGENTS.md`; a test compares the two.
+For a real API check, prefer free calls (`models`, `estimate`, `run … --dry-run`). A paid check uses the cheapest model that proves the point (`gpt-image-2 -q low`, under a cent) with `--max-usd`. If you change the page in `src/commands/agent.ts`, rerun `npm run dev -- agent --write AGENTS.md`; a test compares the two.
