@@ -9,7 +9,7 @@ description: Generate images, video, lip-sync and captions with the Sume Open AP
 
 ## Before you start
 
-- Check the key: `opensume auth status --json`. If `valid` is false, ask the user to create a key at https://open.sume.com/api-keys and export it as `SUME_API_KEY`. Never ask them to paste it into the chat, and never print it.
+- Check the key: `opensume auth status --json`. If `valid` is false, read `error.hint` first: a key works only on the API host it was made for, so a good key on the wrong host looks wrong. The default host is Open production (`https://api.open.sume.com`); keys from open.sume.com are for `https://api.dev.sume.com` while it is in preview, and `SUME_API_BASE_URL` picks the host. Otherwise ask the user to create a key at https://open.sume.com/api-keys and export it as `SUME_API_KEY`. Never ask them to paste it into the chat, and never print it.
 - Generation costs real money from the user's open.sume.com balance. Pricing (`estimate`) and listing (`models`) are free.
 
 ## Pick a model
@@ -57,7 +57,7 @@ If a wait times out (exit 6) or is interrupted (exit 130), the job keeps running
 | 0 | Done | |
 | 1 | Network or server error | Retry; for a failed submit, pass back its `idempotency_key` |
 | 2 | Bad command line | Fix the flags; see `opensume <command> --help` |
-| 3 | Key missing, wrong or not allowed | Ask the user for a valid open.sume.com key |
+| 3 | Key missing, wrong, for the other host, or not allowed | Follow `error.hint`; else ask the user for a valid key |
 | 4 | The API refused the request | Read `error.message` and `error.details`, fix the input |
 | 5 | The job failed or was canceled | `opensume jobs get <id> --json` has the `error`; failed jobs are refunded |
 | 6 | Timed out waiting | `opensume jobs wait <id>` |

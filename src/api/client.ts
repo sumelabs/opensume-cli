@@ -294,7 +294,7 @@ export class SumeClient {
       }
 
       const errorBody = toErrorBody(json, response.status, text);
-      const apiError = new ApiError(response.status, errorBody, requestId);
+      const apiError = new ApiError(response.status, errorBody, requestId, this.baseUrl);
       if (attempt < attempts && RETRY_STATUSES.has(response.status) && errorBody.code !== "concurrency_limit_reached") {
         const after = retryAfterMs(response.headers, errorBody);
         await this.#sleep(after ?? backoffMs(attempt), options.signal);

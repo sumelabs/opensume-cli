@@ -1,3 +1,4 @@
+import { otherHostHint } from "../lib/config.ts";
 import { CliError, ExitCode } from "../lib/errors.ts";
 import type { ApiErrorBody } from "./types.ts";
 
@@ -14,11 +15,12 @@ export class ApiError extends CliError {
   readonly details: unknown;
   readonly body: ApiErrorBody;
 
-  constructor(status: number, body: ApiErrorBody, requestId?: string) {
+  /** `baseUrl` is the host that answered, for hints that name it. */
+  constructor(status: number, body: ApiErrorBody, requestId?: string, baseUrl?: string) {
     super(body.message || `The API answered ${status}.`, {
       exitCode: exitCodeFor(status, body.code),
       code: body.code,
-      hint: hintFor(status, body),
+      hint: hintFor(status, body, baseUrl),
     });
     this.name = "ApiError";
     this.status = status;
@@ -73,11 +75,13 @@ export function exitCodeFor(status: number, code: string | undefined): ExitCode 
   return ExitCode.Error;
 }
 
-function hintFor(status: number, body: ApiErrorBody): string | undefined {
+function hintFor(status: number, body: ApiErrorBody, baseUrl: string | undefined): string | undefined {
   const details = (body.details ?? {}) as Record<string, unknown>;
   switch (body.code) {
     case "unauthorized":
-      return `Check the key with \`opensume auth status\`. Create one at ${KEYS_URL}.`;
+      return baseUrl
+        ? `${otherHostHint(baseUrl)} Check the key with \`opensume auth status\`.`
+        : `Check the key with \`opensume auth status\`. Create one at ${KEYS_URL}.`;
     case "open_key_route_not_allowed":
       return "open.sume.com keys call images, video, jobs and prices only.";
     case "session_not_accepted":

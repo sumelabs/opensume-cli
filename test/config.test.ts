@@ -2,7 +2,16 @@ import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { configDir, DEFAULT_BASE_URL, maskKey, readConfig, resolveSettings, writeConfig } from "../src/lib/config.ts";
+import {
+  configDir,
+  DEFAULT_BASE_URL,
+  DEV_BASE_URL,
+  maskKey,
+  otherHostHint,
+  readConfig,
+  resolveSettings,
+  writeConfig,
+} from "../src/lib/config.ts";
 
 const dir = () => mkdtempSync(join(tmpdir(), "opensume-config-"));
 
@@ -36,7 +45,17 @@ describe("resolveSettings", () => {
     });
   });
 
-  it("defaults to the public dev API with no key", () => {
+  it("defaults to Open production, not sume.com's API", () => {
+    expect(DEFAULT_BASE_URL).toBe("https://api.open.sume.com");
+  });
+
+  it("names the other stack when a key is refused", () => {
+    expect(otherHostHint(DEFAULT_BASE_URL)).toContain(`--base-url ${DEV_BASE_URL}`);
+    expect(otherHostHint(DEV_BASE_URL)).toContain(`--base-url ${DEFAULT_BASE_URL}`);
+    expect(otherHostHint("http://localhost:8787")).toContain(`--base-url ${DEFAULT_BASE_URL}`);
+  });
+
+  it("defaults to the default host with no key", () => {
     expect(resolveSettings({}, { OPENSUME_CONFIG_DIR: dir() })).toMatchObject({
       apiKey: undefined,
       baseUrl: DEFAULT_BASE_URL,

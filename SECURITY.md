@@ -17,7 +17,7 @@ Fixes land in the latest release. Run `opensume update` (standalone installs) or
 
 ## How the CLI handles your key
 
-- It sends the key only to the API host you configure (`https://api.dev.sume.com` by default), in an `Authorization` header.
+- It sends the key only to the API host you configure (`https://api.open.sume.com` by default), in an `Authorization` header.
 - It never sends the key to storage upload URLs or media URLs.
 - `opensume auth login` stores the key in a config file that only your user can read (mode `0600`). It does not encrypt the key, so treat that file like an SSH key. `SUME_API_KEY` in the environment avoids storing it at all.
 - It never prints the full key. `opensume auth status` shows the same prefix and last four characters as the API keys page.

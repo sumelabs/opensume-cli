@@ -272,6 +272,8 @@ describe("run", () => {
     const wrong = await cli(["run", "gpt-image-2", "a cup"], { key: "sume_live_wrong" });
     expect(wrong.code).toBe(3);
     expect(wrong.stderr).toContain("Missing or invalid API key.");
+    // Each stack has its own keys: the hint names the other host to try.
+    expect(wrong.stderr).toContain("--base-url https://api.open.sume.com");
   });
 
   it("exits 7 on insufficient funds, with the amounts", async () => {
@@ -425,6 +427,10 @@ describe("auth", () => {
     const bad = await cli(["auth", "status"], { key: "sume_live_wrong_wrong_wrong_wrong_wrong" });
     expect(bad.code).toBe(3);
     expect(bad.stdout).toContain("does not accept this key");
+    expect(bad.stderr).toContain("Keys work only on the API they were made for");
+
+    const json = await cli(["auth", "status", "--json"], { key: "sume_live_wrong_wrong_wrong_wrong_wrong" });
+    expect(json.json<{ error: { hint: string } }>().error.hint).toContain("--base-url https://api.open.sume.com");
   });
 });
 
@@ -519,6 +525,8 @@ describe("fal-level features", () => {
       "Key",
       "Media",
     ]);
+    const api = ok.json<{ checks: { name: string; detail: string }[] }>().checks.find((c) => c.name === "API");
+    expect(api?.detail).toContain("build 012345678 (open-v9.9.9)");
     expect((await cli(["doctor"], { key: null })).code).toBe(3);
   });
 });

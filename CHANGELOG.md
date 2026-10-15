@@ -4,6 +4,24 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-10-15
+
+Synced with the Open API as it is now: Open has its own production stack.
+
+### Changed
+
+- The default API host is Open production, `https://api.open.sume.com` (it was Sume's development API, `https://api.dev.sume.com`). The development API still works with `--base-url`, `SUME_API_BASE_URL` or `opensume auth login --base-url`; it has models in preview and its own keys. While open.sume.com is in preview, its keys are development keys. README → API hosts lists both.
+- `npm run sync-schema` reads the default host's OpenAPI. The vendored request schemas already matched both hosts.
+
+### Added
+
+- A refused key names the other host to try, in run errors, `auth status` (also `error.hint` in `--json`) and `doctor`: a key works only on the stack it was made for.
+- `doctor` shows the API's release next to its build, such as `build 5fadc7571 (open-v0.2.0)`.
+
+### Fixed
+
+- The README's prices: `gpt-image-2` at low quality costs $0.012 now.
+
 ## [0.2.2] - 2026-10-15
 
 ### Fixed
@@ -60,7 +78,8 @@ The first release: every model on open.sume.com, from the terminal.
 - Standalone binaries for macOS (arm64, x64), Linux (x64, arm64; glibc and musl) and Windows x64, built to run on CPUs without AVX2. Checksum-verified `install.sh` and `install.ps1`, an npm tarball on each release, and `opensume update`.
 - An agent skill in `skills/opensume`.
 
-[Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/sumelabs/opensume-cli/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/sumelabs/opensume-cli/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/sumelabs/opensume-cli/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/sumelabs/opensume-cli/compare/v0.1.0...v0.2.0

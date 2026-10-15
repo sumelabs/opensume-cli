@@ -4,7 +4,7 @@ Notes for coding agents working on this repository. Humans: [CONTRIBUTING.md](CO
 
 ## What this is
 
-`opensume` is the command-line client for the Sume Open API, the API behind open.sume.com. It lists models and prices, prices a request, submits it to the image or video router, polls the job, and saves the files. The API contract is the OpenAPI document at `https://api.dev.sume.com/v1/openapi.json`; the docs are at `https://open.sume.com/docs`.
+`opensume` is the command-line client for the Sume Open API, the API behind open.sume.com. It lists models and prices, prices a request, submits it to the image or video router, polls the job, and saves the files. The CLI's default host is Open production, `https://api.open.sume.com`; its API contract is the OpenAPI document at `https://api.open.sume.com/v1/openapi.json`, and the docs are at `https://open.sume.com/docs`. Sume's development stack, `https://api.dev.sume.com`, serves the same Open API with models in preview and its own keys (README → API hosts). `api.sume.com` is sume.com's API, never the CLI's.
 
 ## Commands
 
@@ -15,7 +15,7 @@ npm test               # vitest: unit + end-to-end against a mock API, ~1 s
 npm run check          # lint + typecheck + test + build; run before you finish
 npm run lint:fix       # Biome format and lint fixes
 node scripts/build-binaries.mjs darwin-arm64   # standalone binary (needs bun)
-npm run sync-schema    # refresh src/generated/router-schemas.ts from the API's OpenAPI
+npm run sync-schema    # refresh src/generated/router-schemas.ts from the default host's OpenAPI
 ```
 
 ## Where things are
@@ -42,4 +42,4 @@ npm run sync-schema    # refresh src/generated/router-schemas.ts from the API's 
 
 ## Real API checks
 
-With a key in `SUME_API_KEY`, prefer free calls: `opensume models`, `opensume estimate`, `opensume run … --dry-run`. A paid check should be the cheapest model that proves the point (`gpt-image-2 -q low` costs under a cent). Pass `--max-usd` so a mistake cannot spend more.
+With a key in `SUME_API_KEY` (and `SUME_API_BASE_URL` if the key is for the development stack), prefer free calls: `opensume models`, `opensume estimate`, `opensume run … --dry-run`. A paid check should be the cheapest model that proves the point (`gpt-image-2 -q low` costs $0.012). Pass `--max-usd` so a mistake cannot spend more.

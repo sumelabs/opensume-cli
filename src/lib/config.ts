@@ -4,11 +4,17 @@ import { dirname, join } from "node:path";
 import { CliError, ExitCode } from "./errors.ts";
 
 /**
- * Where the Open API lives. open.sume.com and its API are in preview on
- * Sume's development deployment; `SUME_API_BASE_URL` or `--base-url`
- * points the CLI anywhere else.
+ * Where the Open API lives: Open's production stack, released as `open-v*`.
+ * `SUME_API_BASE_URL` or `--base-url` points the CLI anywhere else.
  */
-export const DEFAULT_BASE_URL = "https://api.dev.sume.com";
+export const DEFAULT_BASE_URL = "https://api.open.sume.com";
+
+/**
+ * Sume's shared development stack. It runs every main commit, has models in
+ * preview, and has its own keys: open.sume.com makes keys for it while the
+ * console is in preview.
+ */
+export const DEV_BASE_URL = "https://api.dev.sume.com";
 
 /** The Open API docs (models, jobs, errors, webhooks). */
 export const DOCS_URL = "https://open.sume.com/docs";
@@ -112,4 +118,13 @@ export function maskKey(key: string): string {
   if (trimmed.startsWith("sume_") && trimmed.length >= 30) return `${trimmed.slice(0, 18)}…${trimmed.slice(-4)}`;
   if (trimmed.length <= 12) return "…";
   return `${trimmed.slice(0, 4)}…${trimmed.slice(-4)}`;
+}
+
+/**
+ * What to try when a host refuses a key. Each stack has its own keys, so a
+ * good key sent to the other stack is refused as if it were wrong.
+ */
+export function otherHostHint(baseUrl: string): string {
+  const other = baseUrl === DEFAULT_BASE_URL ? DEV_BASE_URL : DEFAULT_BASE_URL;
+  return `Keys work only on the API they were made for. If this key is for ${other}, add --base-url ${other}.`;
 }

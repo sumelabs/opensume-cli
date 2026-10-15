@@ -2,7 +2,7 @@ import { SumeClient } from "../api/client.ts";
 import { ApiError } from "../api/errors.ts";
 import type { Context } from "../context.ts";
 import type { CommandSpec } from "../lib/args.ts";
-import { maskKey, readConfig, removeConfig, writeConfig } from "../lib/config.ts";
+import { maskKey, otherHostHint, readConfig, removeConfig, writeConfig } from "../lib/config.ts";
 import { CliError, ExitCode, UsageError } from "../lib/errors.ts";
 import { readAllStdin, readSecret } from "../lib/prompt.ts";
 
@@ -66,7 +66,9 @@ const status: CommandSpec = {
         key: apiKey ? maskKey(apiKey) : null,
         key_source: apiKeySource ?? null,
         valid: verdict?.ok ?? false,
-        ...(verdict && !verdict.ok ? { error: { code: verdict.error.code, message: verdict.error.message } } : {}),
+        ...(verdict && !verdict.ok
+          ? { error: { code: verdict.error.code, message: verdict.error.message, hint: verdict.error.hint ?? null } }
+          : {}),
       });
     } else {
       const { c } = ui;
@@ -81,6 +83,7 @@ const status: CommandSpec = {
           `${c.dim("Key     ")} ${maskKey(apiKey)} ${c.dim(`(from ${apiKeySource ? sources[apiKeySource] : "?"})`)}`,
         );
         ui.out(`${c.dim("Check   ")} ${verdict?.ok ? c.green("ok") : c.red(verdict?.error.message ?? "failed")}`);
+        if (verdict && !verdict.ok && verdict.error.hint) ui.info(c.dim(`\n${verdict.error.hint}`));
       }
     }
     if (!apiKey) return ExitCode.Auth;
@@ -129,7 +132,14 @@ async function checkKey(ctx: Context, key: string): Promise<{ ok: true } | { ok:
         ok: false,
         error: new CliError(
           error.apiCode === "unauthorized" ? "The API does not accept this key (wrong or revoked)." : error.message,
-          { exitCode: ExitCode.Auth, code: error.apiCode, hint: `Create a new key at ${KEYS_URL}.` },
+          {
+            exitCode: ExitCode.Auth,
+            code: error.apiCode,
+            hint:
+              error.apiCode === "unauthorized"
+                ? `${otherHostHint(client.baseUrl)} Or create a new key at ${KEYS_URL}.`
+                : error.hint,
+          },
         ),
       };
     }

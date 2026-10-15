@@ -27,7 +27,7 @@
 - **One self-contained binary.** No runtime to install, no dependencies, no telemetry, no background update checks.
 
 > [!NOTE]
-> open.sume.com and its API are in preview. The CLI talks to the API at `https://api.dev.sume.com`; the [API docs](https://open.sume.com/docs) are on open.sume.com. Set `SUME_API_BASE_URL` to point the CLI elsewhere.
+> The CLI calls Open's production API, `https://api.open.sume.com`. Sume's development API, `https://api.dev.sume.com`, has models in preview and its own keys; see [API hosts](#api-hosts). The [API docs](https://open.sume.com/docs) are on open.sume.com.
 
 ## Contents
 
@@ -83,12 +83,14 @@ opensume auth login        # paste the key; it is checked, then stored for your 
 
 Or export it for the current shell instead: `export SUME_API_KEY="sume_live_..."`.
 
-**2. Make an image.** This one costs $0.0077:
+While open.sume.com is in preview, the keys it makes are for the development API. Save one with `opensume auth login --base-url https://api.dev.sume.com`, and the CLI remembers the host with the key.
+
+**2. Make an image.** This one costs $0.012:
 
 ```console
 $ opensume run gpt-image-2 "a ceramic cup on a wooden table, morning light" -q low -o cup.png
 Job job_7558248a-3a25-4b2a-9f6a-832bdc23b846
-✓ gpt-image-2 completed in 15s · $0.0077
+✓ gpt-image-2 completed in 15s · $0.0120
   cup.png  934 KB · image/png
 ```
 
@@ -260,11 +262,11 @@ opensume auth logout                                 # forget the saved key
 
 ```console
 $ opensume doctor
-✓ CLI     opensume 0.2.0 (bun 1.4.2, darwin arm64, standalone)
+✓ CLI     opensume 0.2.3 (bun 1.4.2, darwin arm64, standalone)
 ✓ Update  latest release
 ✓ Config  ~/.config/opensume/config.json (mode 600)
-✓ API     https://api.dev.sume.com · ok · build 050f0b54a · public · 132ms
-✓ Models  62 models in the open catalog · 172ms
+✓ API     https://api.open.sume.com · ok · build 5fadc7571 (open-v0.2.0) · public · 197ms
+✓ Models  52 models in the open catalog · 117ms
 ✓ Key     sume_live_Xy12_ab3…9QzK (SUME_API_KEY) · accepted · 120ms
 ✓ Media   media.sume.com reachable · 97ms
 ```
@@ -288,7 +290,7 @@ open.sume.com keys pay in US dollars from your open.sume.com balance; top up und
 $ opensume run gpt-image-2 "a red kite over a beach, flat illustration" -q low -o kite.png --max-usd 0.02 --json
 {
   "job": { "id": "job_d45000cc-9bc7-4631-8feb-18e596a6da3d", "model": "gpt-image-2", "status": "completed" },
-  "usd": "0.0077",
+  "usd": "0.0120",
   "elapsed_ms": 15093,
   "artifacts": [
     {
@@ -343,6 +345,15 @@ A flag beats the environment, which beats the config file. The config file is `~
 
 Color follows the terminal; `NO_COLOR=1` or `--no-color` turns it off and `FORCE_COLOR=1` turns it on. Completion caches model ids for a day under `~/.cache/opensume`.
 
+### API hosts
+
+| Host | What it is | Keys |
+|---|---|---|
+| `https://api.open.sume.com` (default) | Open's production API, released as `open-v*` tags | Open production keys |
+| `https://api.dev.sume.com` | Sume's development API: every new commit, and models in preview (62 models against production's 52 today) | open.sume.com keys, while it is in preview |
+
+Both serve the same Open API. A key works only on the host it was made for. On the other host it is refused like a wrong key, and the error names the other host to try. `opensume doctor` shows which host and release you are on. `api.sume.com` is sume.com's API, not Open's; do not point the CLI at it.
+
 **Shell completion** (commands, flags and model ids):
 
 ```sh
@@ -370,7 +381,7 @@ opensume run  ──▶  POST /v1/{image,video}-router/generate   202 + job id, 
 | You see | What to do |
 |---|---|
 | `No API key` (exit 3) | `opensume auth login`, or export `SUME_API_KEY`. |
-| `Missing or invalid API key` (exit 3) | The key is wrong or revoked. Create a new one at open.sume.com → API keys. |
+| `Missing or invalid API key` (exit 3) | The key is wrong, revoked, or made for the other [API host](#api-hosts). The error names the host to try; otherwise create a new key at open.sume.com → API keys. |
 | `The API key contains spaces, line breaks…` (exit 3) | The key was pasted with extra characters. Copy it again. |
 | `open_key_route_not_allowed` (exit 3) | open.sume.com keys call images, video, jobs and prices only. |
 | `Balance too low` (exit 7) | Top up at open.sume.com → Billing. The error shows the price and your balance. |

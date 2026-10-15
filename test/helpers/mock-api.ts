@@ -170,7 +170,7 @@ export class MockApi {
     if (req.method === "GET" && path === "/health") {
       return send(
         200,
-        { service: "mock", status: "ok", build: { commit_sha: "0123456789abcdef" } },
+        { service: "mock", status: "ok", build: { commit_sha: "0123456789abcdef", source_branch: "open-v9.9.9" } },
         { "x-sume-api-surface": "public" },
       );
     }

@@ -6,10 +6,10 @@
 //   node scripts/sync-schema.mjs            # rewrite the generated file
 //   node scripts/sync-schema.mjs --check    # exit 1 if the API has moved on
 //
-// SUME_API_BASE_URL picks the API (default https://api.dev.sume.com).
+// SUME_API_BASE_URL picks the API (default https://api.open.sume.com, the CLI's default host).
 import { readFileSync, writeFileSync } from "node:fs";
 
-const BASE = (process.env.SUME_API_BASE_URL || "https://api.dev.sume.com").replace(/\/+$/u, "").replace(/\/v1$/u, "");
+const BASE = (process.env.SUME_API_BASE_URL || "https://api.open.sume.com").replace(/\/+$/u, "").replace(/\/v1$/u, "");
 const OUT = new URL("../src/generated/router-schemas.ts", import.meta.url);
 const ROUTERS = { image: "/v1/image-router/generate", video: "/v1/video-router/generate" };
 
