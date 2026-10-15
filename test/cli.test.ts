@@ -289,6 +289,13 @@ describe("run", () => {
     expect(res.stderr).toContain("Did you mean gpt-image-2?");
   });
 
+  it("points a model the routers know but this host lacks at the development API", async () => {
+    const res = await cli(["run", "veo-3.1", "a cup", "-d", "4"]);
+    expect(res.code).toBe(4);
+    expect(res.stderr).toMatch(/No model "veo-3\.1" on (127\.0\.0\.1|localhost):\d+\./u);
+    expect(res.stderr).toContain("--base-url https://api.dev.sume.com");
+  });
+
   it("reports errors as JSON in --json mode", async () => {
     const res = await cli(["run", "gpt-image2", "a cup", "--json"]);
     expect(res.code).toBe(4);

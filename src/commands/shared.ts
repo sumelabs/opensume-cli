@@ -4,8 +4,10 @@ import { ApiError } from "../api/errors.ts";
 import type { Artifact, CatalogModel, Estimate, Job, JobEvent, ResultResponse, StatusResponse } from "../api/types.ts";
 import type { Context } from "../context.ts";
 import { closest, type FlagSpec } from "../lib/args.ts";
+import { DEV_BASE_URL } from "../lib/config.ts";
 import { downloadTo, planPaths, type SavedFile } from "../lib/download.ts";
 import { CliError, ExitCode, UsageError } from "../lib/errors.ts";
+import { routerSchema } from "../lib/schema.ts";
 import { formatBytes, formatDuration, formatUsd } from "../lib/ui.ts";
 import { parseDuration, waitForJob } from "../lib/wait.ts";
 
@@ -242,12 +244,19 @@ export async function resolveModel(ctx: Context, id: string): Promise<CatalogMod
       id,
       models.map((m) => m.id),
     );
-    throw new CliError(`No model "${id}" on open.sume.com.`, {
+    // The routers take more models than one host's catalog lists: the
+    // development API has models in preview that production does not.
+    const elsewhere =
+      client.baseUrl !== DEV_BASE_URL &&
+      (["image", "video"] as const).some((r) => routerSchema(r).fields.model?.enum?.includes(id));
+    throw new CliError(`No model "${id}" on ${new URL(client.baseUrl).host}.`, {
       exitCode: ExitCode.Rejected,
       code: "model_not_found",
       hint: guess
         ? `Did you mean ${guess}? See every model with \`opensume models\`.`
-        : "See every model with `opensume models`.",
+        : elsewhere
+          ? `${id} may be in preview on the development API: add --base-url ${DEV_BASE_URL}.`
+          : "See every model with `opensume models`.",
     });
   }
 }

@@ -4,6 +4,12 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-10-15
+
+### Fixed
+
+- An unknown model names the host that was asked (`No model "veo-3.1" on api.open.sume.com.`). When the API's routers take the model but this host's catalog does not list it, the hint points at the development API, where models in preview run.
+
 ## [0.2.3] - 2026-10-15
 
 Synced with the Open API as it is now: Open has its own production stack.
@@ -78,7 +84,8 @@ The first release: every model on open.sume.com, from the terminal.
 - Standalone binaries for macOS (arm64, x64), Linux (x64, arm64; glibc and musl) and Windows x64, built to run on CPUs without AVX2. Checksum-verified `install.sh` and `install.ps1`, an npm tarball on each release, and `opensume update`.
 - An agent skill in `skills/opensume`.
 
-[Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/sumelabs/opensume-cli/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/sumelabs/opensume-cli/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/sumelabs/opensume-cli/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/sumelabs/opensume-cli/compare/v0.2.0...v0.2.1
