@@ -219,7 +219,12 @@ async function runCommand(parsed: Parsed, ctx: Context): Promise<number> {
     firstDelaySeconds: submitted.data.terminal ? 0 : submitted.data.next_poll_after_seconds,
     flags,
     usd: estimate?.usd,
-    extra: { idempotency_key: idempotencyKey, ...(warnings.length ? { warnings } : {}) },
+    replayed: submitted.data.idempotency_hit,
+    extra: {
+      idempotency_key: idempotencyKey,
+      ...(submitted.data.idempotency_hit ? { idempotency_hit: true } : {}),
+      ...(warnings.length ? { warnings } : {}),
+    },
   });
 }
 

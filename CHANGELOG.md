@@ -4,6 +4,17 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-15
+
+Found by using 0.2.0 against api.dev.
+
+### Fixed
+
+- After a definite refusal (any 4xx), errors no longer suggest rerunning with the idempotency key: nothing was created. The key is named only when the outcome is uncertain (network errors, 5xx, interrupts).
+- A submit that matched an earlier one by idempotency key says its price was paid by the first submit, and `--json` marks it `idempotency_hit: true`.
+- `--timeout` names the job to resume once, not twice.
+- Canceling a job whose generation already started explains that it will finish or fail on its own.
+
 ## [0.2.0] - 2026-10-15
 
 Found by running every model on api.dev through the published 0.1.0, and by holding the CLI up against fal's genmedia.
@@ -43,6 +54,7 @@ The first release: every model on open.sume.com, from the terminal.
 - Standalone binaries for macOS (arm64, x64), Linux (x64, arm64; glibc and musl) and Windows x64, built to run on CPUs without AVX2. Checksum-verified `install.sh` and `install.ps1`, an npm tarball on each release, and `opensume update`.
 - An agent skill in `skills/opensume`.
 
-[Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/sumelabs/opensume-cli/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/sumelabs/opensume-cli/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sumelabs/opensume-cli/releases/tag/v0.1.0

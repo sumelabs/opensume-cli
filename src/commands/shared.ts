@@ -265,6 +265,8 @@ export interface FollowOptions {
   usd?: string | undefined;
   /** Report the job's own run time (created → completed), not time spent waiting here. */
   jobTime?: boolean;
+  /** The submit matched an earlier one by Idempotency-Key: this run paid nothing. */
+  replayed?: boolean;
   /** Extra fields for the `--json` document. */
   extra?: Record<string, unknown>;
 }
@@ -285,7 +287,9 @@ export async function followJob(ctx: Context, options: FollowOptions): Promise<n
   const { flags } = options;
   const timeoutMs = options.timeoutMs;
   const label = options.model ?? "job";
-  const price = options.usd ? ` · ${formatUsd(options.usd)}` : "";
+  const price = options.usd
+    ? ` · ${formatUsd(options.usd)}${options.replayed ? " (paid by the first submit)" : ""}`
+    : "";
   ctx.jobId = options.jobId;
 
   const tail = flags.logs === true ? eventTail(ctx, options.jobId) : undefined;

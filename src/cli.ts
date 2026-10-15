@@ -236,8 +236,13 @@ function interrupted(ui: Ui, json: boolean, job: JobContext): number {
 }
 
 /** Print an error the way the output mode asks for, and pick the exit code. */
-function report(ui: Ui, error: unknown, json: boolean, job?: JobContext): number {
+function report(ui: Ui, error: unknown, json: boolean, context?: JobContext): number {
   ui.stopSpinner();
+  // A 4xx is a definite refusal: nothing was created, so there is no job to
+  // get back and no point naming the idempotency key. Network errors and
+  // 5xx leave the outcome open, and those are when the key matters.
+  const refused = error instanceof ApiError && error.status < 500;
+  const job = refused && !context?.jobId ? undefined : context;
   if (error instanceof CliError) {
     const lines = error instanceof ApiError ? error.fieldErrors() : [];
     if (json) {
@@ -260,7 +265,9 @@ function report(ui: Ui, error: unknown, json: boolean, job?: JobContext): number
     } else {
       const detail = lines.length ? `\n${lines.map((l) => `  • ${l}`).join("\n")}` : "";
       const requestId = error instanceof ApiError && error.requestId ? ` (request ${error.requestId})` : "";
-      ui.error(`${error.message}${requestId}${detail}`, [error.hint, jobHint(job)].filter(Boolean).join("\n  "));
+      // Skip the job line when the error's own hint already names the job.
+      const extra = job?.jobId && error.hint?.includes(job.jobId) ? undefined : jobHint(job);
+      ui.error(`${error.message}${requestId}${detail}`, [error.hint, extra].filter(Boolean).join("\n  "));
     }
     return error.exitCode;
   }

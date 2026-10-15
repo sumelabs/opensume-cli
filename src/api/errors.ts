@@ -98,7 +98,8 @@ function hintFor(status: number, body: ApiErrorBody): string | undefined {
     case "job_not_completed":
       return "The job has not finished. Wait for it with `opensume jobs wait <id>`.";
     case "job_not_cancelable":
-      return "Generation has started; the job will finish or fail on its own.";
+    case "job_generation_already_started":
+      return "Generation has started; the job will finish or fail on its own. Failed jobs are refunded.";
     case "idempotency_conflict":
       return "That idempotency key belongs to a different request. Use a new key.";
     case "model_not_found":

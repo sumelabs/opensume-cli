@@ -158,11 +158,19 @@ describe("run", () => {
     expect(res.stderr).toContain("opensume jobs events job_");
   });
 
-  it("exits 6 when --timeout passes, naming the job to resume", async () => {
+  it("exits 6 when --timeout passes, naming the job to resume once", async () => {
     api.readsUntilDone = 1000;
     const res = await cli(["run", "gpt-image-2", "a cup", "--timeout", "1ms"]);
     expect(res.code).toBe(6);
-    expect(res.stderr).toMatch(/opensume jobs wait job_/u);
+    expect(res.stderr.match(/opensume jobs wait job_/gu)).toHaveLength(1);
+  });
+
+  it("says a replayed submit was paid by the first one", async () => {
+    const args = ["run", "gpt-image-2", "a cup", "--idempotency-key", "replay-key", "--no-download"];
+    await cli([...args, "--json"]);
+    const json = await cli([...args, "--json"]);
+    expect(json.json<{ idempotency_hit?: boolean }>().idempotency_hit).toBe(true);
+    expect((await cli(args)).stderr).toContain("(paid by the first submit)");
   });
 
   it("names the job to resume when interrupted", async () => {
@@ -222,6 +230,15 @@ describe("run", () => {
     expect(error.idempotency_key).toBe(api.calls("POST", "/v1/image-router/generate")[0]?.headers["idempotency-key"]);
     const text = await cli(["run", "gpt-image-2", "a cup"]);
     expect(text.stderr).toMatch(/rerun with --idempotency-key [0-9a-f-]{36}/u);
+  });
+
+  it("does not offer the idempotency key after a definite refusal", async () => {
+    api.failNextSubmits = { count: 1, status: 400, code: "invalid_request" };
+    const json = await cli(["run", "gpt-image-2", "a cup", "--json"]);
+    expect(json.code).toBe(4);
+    expect(json.json<{ error: Record<string, unknown> }>().error.idempotency_key).toBeUndefined();
+    api.failNextSubmits = { count: 1, status: 400, code: "invalid_request" };
+    expect((await cli(["run", "gpt-image-2", "a cup"])).stderr).not.toContain("--idempotency-key");
   });
 
   it("refuses a malformed key without printing it", async () => {
