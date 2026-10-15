@@ -1,6 +1,6 @@
 {
   "name": "opensume",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Generate images and video from your terminal with the Sume Open API.",
   "keywords": [
     "sume",

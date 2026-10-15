@@ -33,6 +33,8 @@ export const ROUTER_SCHEMAS = {
           "qwen-image-max",
           "qwen-image-layered",
           "ideogram-v4.5",
+          "kling-image-3",
+          "seedream-5-pro",
           "nano-banana-2"
         ],
         "description": "Required Image Router catalog model id (pass-through). Not accepted on Image 1.0. A retired id (`nano-banana-2`) runs as its successor (`nano-banana-2.1`)."
@@ -276,6 +278,16 @@ export const ROUTER_SCHEMAS = {
           "hunyuan-1.5",
           "hailuo-h3-regen",
           "heygen-video-1",
+          "kling-2.6",
+          "kling-3-turbo",
+          "kling-3-omni",
+          "hailuo-2.3",
+          "hailuo-2.3-fast",
+          "happy-horse-1.0",
+          "happy-horse-1.1",
+          "wan-3.0-prime",
+          "seedance-1.5-pro",
+          "higgsfield-cinema-studio-4",
           "veed-fabric-1.0",
           "veed-fabric-1.0-fast",
           "minimax-h3-max-lip-sync",
@@ -429,7 +441,7 @@ export const ROUTER_SCHEMAS = {
           "4K",
           "4k"
         ],
-        "description": "Defaults to provider/runtime defaults when omitted (typically 720p; MiniMax H3 / H3 Max and h3-max-recast default to 768p). Each model takes only the resolutions its catalog row lists in capabilities.resolutions — higgsfield-genjutsu, seedance-2-mini, seedance-2-fast, grok-imagine-video-1.5, veed-fabric-1.0, veed-fabric-1.0-fast, infinitalk, creatify-aurora, infinitalk-video: 480p, 720p; seedance-2.5, seedance-2, wan-3.0: 480p, 720p, 1080p; kling-3: 1080p; minimax-h3: 480p, 768p, 2K, 4K; minimax-h3-max, minimax-h3-max-lip-sync: 480p, 768p, 1080p; gemini-omni-flash-1.1: 360p, 720p, 1080p, 4K; h3-max-recast: 768p, 1080p; vidu-q4, vidu-q4-reference, omnihuman-1.5: 720p, 1080p; veo-3.1, veo-3.1-fast, veo-3.1-lite: 720p; wand-vega-1.0-lite: 768p, 1080p, 2K, 4K; wand-vega-1.0-pro, wand-vega-1.5-pro, mingmou-1, hunyuan-1.5: 720p, 1080p, 2K, 4K; hailuo-h3-regen: 2K; heygen-video-1: 480p, 768p, 2K; kling-avatar-2.0-pro, kling-avatar-2.0, sync-lipsync-3, sync-lipsync-2-pro, sync-lipsync-2, kling-lipsync, latentsync, veed-lipsync, pixverse-lipsync: ; wan-2.2-speech-to-video: 480p, 580p, 720p; veed-subtitles: 1080p, 4K. Aliases: kling-3 also accept 720p (renders 1080p); minimax-h3, gemini-omni-flash-1.1, wand-vega-1.0-lite, wand-vega-1.0-pro, wand-vega-1.5-pro, mingmou-1, hunyuan-1.5, veed-subtitles also accept 4k (renders 4K). 768p is MiniMax H3 / H3 Max native; minimax-h3-max 1080p is latent refinement from native 768p, and minimax-h3 2K / 4K are 768p upscales."
+        "description": "Defaults to provider/runtime defaults when omitted (typically 720p; MiniMax H3 / H3 Max and h3-max-recast default to 768p). Each model takes only the resolutions its catalog row lists in capabilities.resolutions — higgsfield-genjutsu, seedance-2-mini, seedance-2-fast, grok-imagine-video-1.5, higgsfield-cinema-studio-4, veed-fabric-1.0, veed-fabric-1.0-fast, infinitalk, creatify-aurora, infinitalk-video: 480p, 720p; seedance-2.5, seedance-2, wan-3.0, wan-3.0-prime, seedance-1.5-pro: 480p, 720p, 1080p; kling-3, kling-2.6: 1080p; minimax-h3: 480p, 768p, 2K, 4K; minimax-h3-max, minimax-h3-max-lip-sync: 480p, 768p, 1080p; gemini-omni-flash-1.1: 360p, 720p, 1080p, 4K; h3-max-recast, hailuo-2.3, hailuo-2.3-fast: 768p, 1080p; vidu-q4, vidu-q4-reference, kling-3-turbo, kling-3-omni, happy-horse-1.0, happy-horse-1.1, omnihuman-1.5: 720p, 1080p; veo-3.1, veo-3.1-fast, veo-3.1-lite: 720p; wand-vega-1.0-lite: 768p, 1080p, 2K, 4K; wand-vega-1.0-pro, wand-vega-1.5-pro, mingmou-1, hunyuan-1.5: 720p, 1080p, 2K, 4K; hailuo-h3-regen: 2K; heygen-video-1: 480p, 768p, 2K; kling-avatar-2.0-pro, kling-avatar-2.0, sync-lipsync-3, sync-lipsync-2-pro, sync-lipsync-2, kling-lipsync, latentsync, veed-lipsync, pixverse-lipsync: ; wan-2.2-speech-to-video: 480p, 580p, 720p; veed-subtitles: 1080p, 4K. Aliases: kling-3 also accept 720p (renders 1080p); minimax-h3, gemini-omni-flash-1.1, wand-vega-1.0-lite, wand-vega-1.0-pro, wand-vega-1.5-pro, mingmou-1, hunyuan-1.5, veed-subtitles also accept 4k (renders 4K). 768p is MiniMax H3 / H3 Max native; minimax-h3-max 1080p is latent refinement from native 768p, and minimax-h3 2K / 4K are 768p upscales."
       },
       "duration": {
         "type": "integer",

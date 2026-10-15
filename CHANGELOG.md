@@ -4,6 +4,12 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-10-15
+
+### Fixed
+
+- The request schemas shipped in the CLI are synced with Open production (`open-v0.3.5`). They now know the 12 models added since 0.4.1: kling-image-3, seedream-5-pro, kling-2.6, kling-3-turbo, kling-3-omni, hailuo-2.3, hailuo-2.3-fast, happy-horse-1.0, happy-horse-1.1, wan-3.0-prime, seedance-1.5-pro and higgsfield-cinema-studio-4. So `schema` lists their inputs offline, their fields work as flags, and `--set` values are typed for them.
+
 ## [0.4.2] - 2026-10-15
 
 Hardening, from reading how genmedia (fal's CLI, v0.7.0) fails and checking each case in opensume against a mock that drops connections, serves proxy error pages and fills disks.
@@ -146,7 +152,8 @@ The first release: every model on open.sume.com, from the terminal.
 - Standalone binaries for macOS (arm64, x64), Linux (x64, arm64; glibc and musl) and Windows x64, built to run on CPUs without AVX2. Checksum-verified `install.sh` and `install.ps1`, an npm tarball on each release, and `opensume update`.
 - An agent skill in `skills/opensume`.
 
-[Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/sumelabs/opensume-cli/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/sumelabs/opensume-cli/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/sumelabs/opensume-cli/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/sumelabs/opensume-cli/compare/v0.3.0...v0.4.0
