@@ -4,7 +4,7 @@ Notes for coding agents working on this repository. Humans: [CONTRIBUTING.md](CO
 
 ## What this is
 
-`opensume` is the command-line client for the Sume Open API, the API behind open.sume.com. It lists models and prices, prices a request, submits it to the image or video router, polls the job, and saves the files. The API contract is the OpenAPI document at `https://api.dev.sume.com/v1/openapi.json`; the docs are at `https://api.dev.sume.com/docs`.
+`opensume` is the command-line client for the Sume Open API, the API behind open.sume.com. It lists models and prices, prices a request, submits it to the image or video router, polls the job, and saves the files. The API contract is the OpenAPI document at `https://api.dev.sume.com/v1/openapi.json`; the docs are at `https://open.sume.com/docs`.
 
 ## Commands
 

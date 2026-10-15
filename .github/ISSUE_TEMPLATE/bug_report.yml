@@ -41,7 +41,7 @@ body:
       options:
         - install.sh (macOS or Linux)
         - install.ps1 (Windows)
-        - npm
+        - npm (release tarball)
         - From source
     validations:
       required: true

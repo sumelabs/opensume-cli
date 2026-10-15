@@ -77,7 +77,7 @@ async function modelsCommand(parsed: Parsed, ctx: Context): Promise<number> {
       `No models match${query ? ` "${query}"` : ""}${kind ? ` (kind ${kind})` : ""}${company ? ` (company ${company})` : ""}.`,
       guess ? `Did you mean ${guess}?` : "Run `opensume models` to see them all.",
     );
-    return ExitCode.Rejected;
+    return ExitCode.Ok;
   }
   const { c } = ui;
   ui.table(

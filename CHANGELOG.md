@@ -19,7 +19,7 @@ The first release: every model on open.sume.com, from the terminal.
 - `opensume auth login | status | logout`, with an owner-only config file.
 - `--json` on every command, with errors as JSON too; documented exit codes; `opensume --help --json` command manifest.
 - Shell completion for bash, zsh and fish, with model ids.
-- Standalone binaries for macOS, Linux and Windows. Checksum-verified `install.sh` and `install.ps1`, and `opensume update`.
+- Standalone binaries for macOS (arm64, x64), Linux (x64, arm64; glibc and musl) and Windows x64, built to run on CPUs without AVX2. Checksum-verified `install.sh` and `install.ps1`, an npm tarball on each release, and `opensume update`.
 - An agent skill in `skills/opensume`.
 
 [Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.1.0...HEAD

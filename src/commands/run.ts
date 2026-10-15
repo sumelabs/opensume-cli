@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { basename, resolve } from "node:path";
+import { ApiError } from "../api/errors.ts";
 import type { Estimate } from "../api/types.ts";
 import type { Context } from "../context.ts";
 import type { CommandSpec, Parsed } from "../lib/args.ts";
@@ -7,7 +8,7 @@ import { buildBody, type InputFlags, localMediaPaths, replaceMedia, routerFor } 
 import { CliError, ExitCode, UsageError } from "../lib/errors.ts";
 import { formatBytes, formatUsd } from "../lib/ui.ts";
 import { uploadFile } from "../lib/upload.ts";
-import { followJob, INPUT_FLAGS, pricingNotes, resolveModel, WAIT_FLAGS } from "./shared.ts";
+import { followJob, INPUT_FLAGS, pricingNotes, resolveModel, timeoutFlag, WAIT_FLAGS } from "./shared.ts";
 
 export const run: CommandSpec = {
   name: "run",
@@ -77,6 +78,8 @@ async function runCommand(parsed: Parsed, ctx: Context): Promise<number> {
     throw new UsageError("Give the prompt once: as the second argument or with --prompt, not both.");
   }
   const prompt = positionalPrompt ?? flags.prompt;
+  // Every local check happens before anything is uploaded or paid for.
+  const timeoutMs = timeoutFlag(flags);
   const startedAt = Date.now();
   const client = ctx.client();
 
@@ -85,6 +88,11 @@ async function runCommand(parsed: Parsed, ctx: Context): Promise<number> {
   const body = await buildBody(model, { ...flags, prompt });
   const localFiles = localMediaPaths(body);
   const maxUsd = flags["max-usd"] as number | undefined;
+  const warnings: string[] = [];
+  const warn = (note: string) => {
+    warnings.push(note);
+    if (!json) ui.warn(note);
+  };
 
   // The estimate prices the request as sent; uploaded files only change
   // their URLs, so placeholders stand in for them until they exist.
@@ -93,13 +101,18 @@ async function runCommand(parsed: Parsed, ctx: Context): Promise<number> {
     estimateBody,
     new Map(localFiles.map((p) => [p, `https://upload.invalid/${encodeURIComponent(basename(p))}`])),
   );
-  const estimating = client.estimate(model.id, estimateBody, ctx.signal).catch((error: unknown) => {
-    ui.debug(`estimate failed: ${(error as Error).message}`);
-    return undefined;
-  });
+  const estimating: Promise<{ estimate?: Estimate; error?: unknown }> = client
+    .estimate(model.id, estimateBody, ctx.signal)
+    .then(
+      (estimate) => ({ estimate }),
+      (error: unknown) => {
+        ui.debug(`estimate failed: ${(error as Error).message}`);
+        return { error };
+      },
+    );
 
   if (flags["dry-run"] === true) {
-    const estimate = await estimating;
+    const { estimate } = await estimating;
     ui.stopSpinner();
     const notes = estimate ? pricingNotes(body, estimate) : [];
     if (json) {
@@ -113,7 +126,7 @@ async function runCommand(parsed: Parsed, ctx: Context): Promise<number> {
       });
     } else {
       ui.out(`${ui.c.dim(`POST /v1/${routerFor(model)}-router/generate`)}`);
-      ui.out(JSON.stringify({ model: model.id, ...body }, null, 2));
+      ui.out(JSON.stringify({ ...body, model: model.id }, null, 2));
       if (localFiles.length) ui.info(ui.c.dim(`Would upload: ${localFiles.join(", ")}`));
       ui.info(estimate ? `Price: ${priceLine(estimate)}` : "Price: unavailable");
       for (const note of notes) ui.warn(note);
@@ -122,20 +135,13 @@ async function runCommand(parsed: Parsed, ctx: Context): Promise<number> {
   }
 
   if (maxUsd !== undefined) {
-    const estimate = await estimating;
-    if (!estimate) {
-      throw new CliError("Could not price the request, so --max-usd cannot be checked. Nothing was submitted.", {
-        code: "estimate_unavailable",
-      });
-    }
-    for (const note of pricingNotes(body, estimate)) ui.warn(note);
+    const { estimate, error } = await estimating;
+    if (!estimate) throw unpriced(error);
+    for (const note of pricingNotes(body, estimate)) warn(note);
     if (Number(estimate.usd) > maxUsd) {
       throw new CliError(
         `This costs ${formatUsd(estimate.usd)}, over --max-usd ${formatUsd(maxUsd)}. Nothing was submitted.`,
-        {
-          exitCode: ExitCode.Funds,
-          code: "over_budget",
-        },
+        { exitCode: ExitCode.Funds, code: "over_budget" },
       );
     }
   }
@@ -152,16 +158,20 @@ async function runCommand(parsed: Parsed, ctx: Context): Promise<number> {
   }
 
   const idempotencyKey = (flags["idempotency-key"] as string | undefined) ?? randomUUID();
+  // From here on, any error or interrupt names the key (and then the job),
+  // so a retry adopts the job instead of paying for a second one.
+  ctx.idempotencyKey = idempotencyKey;
   ui.spin(`Submitting to ${model.id}`);
-  const submitted = await client.generate(routerFor(model), { model: model.id, ...body }, idempotencyKey, ctx.signal);
+  const submitted = await client.generate(routerFor(model), { ...body, model: model.id }, idempotencyKey, ctx.signal);
   const job = submitted.data.job;
-  const estimate = await estimating;
+  ctx.jobId = job.id;
+  const { estimate } = await estimating;
   ui.stopSpinner();
   if (submitted.data.idempotency_hit) ui.info(ui.c.dim(`Idempotency key matched ${job.id}; following that job.`));
 
   if (flags["no-wait"] === true) {
     if (json) {
-      ui.json({ ...submitted.data, ...(estimate ? { estimate } : {}) });
+      ui.json({ ...submitted.data, ...(estimate ? { estimate } : {}), ...(warnings.length ? { warnings } : {}) });
     } else {
       ui.success(`Submitted ${ui.c.bold(job.id)} (${model.id}${estimate ? `, ${formatUsd(estimate.usd)}` : ""})`);
       ui.info(ui.c.dim(`Follow it with: opensume jobs wait ${job.id}`));
@@ -175,10 +185,29 @@ async function runCommand(parsed: Parsed, ctx: Context): Promise<number> {
     jobId: job.id,
     model: model.id,
     startedAt,
+    timeoutMs,
     firstDelaySeconds: submitted.data.terminal ? 0 : submitted.data.next_poll_after_seconds,
     flags,
     usd: estimate?.usd,
-    extra: { idempotency_key: idempotencyKey },
+    extra: { idempotency_key: idempotencyKey, ...(warnings.length ? { warnings } : {}) },
+  });
+}
+
+/** Why `--max-usd` could not be checked, with the API's own reason when it gave one. */
+function unpriced(error: unknown): CliError {
+  if (error instanceof ApiError) {
+    return new CliError(
+      `Could not price the request (${error.message}), so --max-usd cannot be checked. Nothing was submitted.`,
+      {
+        exitCode: error.exitCode,
+        code: error.apiCode,
+        hint: error.requestId ? `Request id: ${error.requestId}` : error.hint,
+      },
+    );
+  }
+  return new CliError("Could not price the request, so --max-usd cannot be checked. Nothing was submitted.", {
+    code: "estimate_unavailable",
+    hint: error instanceof Error ? error.message : undefined,
   });
 }
 

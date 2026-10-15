@@ -63,12 +63,21 @@ case "$version" in
   *) fail "no published release found at https://github.com/$REPO/releases" ;;
 esac
 
-asset="opensume-$os-$arch"
+# Alpine and other musl-based systems need the musl build.
+libc=""
+if [ "$os" = "linux" ]; then
+  for loader in /lib/ld-musl-*; do
+    [ -e "$loader" ] && libc="-musl"
+    break
+  done
+fi
+
+asset="opensume-$os-$arch$libc"
 base="https://github.com/$REPO/releases/download/v$version"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
-say "${DIM}Downloading opensume $version ($os $arch)…${RESET}"
+say "${DIM}Downloading opensume $version ($os $arch${libc:+ musl})…${RESET}"
 curl -fsSL --retry 3 -o "$tmp/$asset" "$base/$asset" || fail "download failed: $base/$asset"
 curl -fsSL --retry 3 -o "$tmp/checksums.txt" "$base/checksums.txt" || fail "download failed: $base/checksums.txt"
 

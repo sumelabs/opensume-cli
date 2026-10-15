@@ -197,6 +197,11 @@ export const WAIT_FLAGS: readonly FlagSpec[] = [
 
 export const DEFAULT_TIMEOUT = "30m";
 
+/** `--timeout`, parsed up front so a typo never costs a submit. */
+export function timeoutFlag(flags: Record<string, unknown>): number {
+  return parseDuration(String(flags.timeout ?? DEFAULT_TIMEOUT));
+}
+
 /**
  * Where the API priced something other than what was asked. The estimate
  * clamps quietly (a 99 s request on a 15 s model is priced as 15 s), so the
@@ -243,6 +248,8 @@ export async function resolveModel(ctx: Context, id: string): Promise<CatalogMod
 
 export interface FollowOptions {
   jobId: string;
+  /** Parsed `--timeout`, checked before anything was submitted. */
+  timeoutMs: number;
   model: string | null | undefined;
   /** When the clock started, for "completed in …". */
   startedAt: number;
@@ -270,7 +277,7 @@ export async function followJob(ctx: Context, options: FollowOptions): Promise<n
   const { ui, json } = ctx;
   const client = ctx.client();
   const { flags } = options;
-  const timeoutMs = parseDuration(String(flags.timeout ?? DEFAULT_TIMEOUT));
+  const timeoutMs = options.timeoutMs;
   const label = options.model ?? "job";
   const price = options.usd ? ` · ${formatUsd(options.usd)}` : "";
   ctx.jobId = options.jobId;

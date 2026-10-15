@@ -98,7 +98,7 @@ function timeoutError(jobId: string, timeoutMs: number): CliError {
 /** `90`, `90s`, `5m`, `1h30m` → milliseconds. */
 export function parseDuration(text: string): number {
   const trimmed = text.trim().toLowerCase();
-  if (/^\d+(\.\d+)?$/u.test(trimmed)) return Number(trimmed) * 1000;
+  if (/^\d+(\.\d+)?$/u.test(trimmed) && Number(trimmed) > 0) return Number(trimmed) * 1000;
   const pattern = /(\d+(?:\.\d+)?)(ms|s|m|h)/gu;
   let total = 0;
   let consumed = "";

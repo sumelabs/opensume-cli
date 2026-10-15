@@ -20,6 +20,12 @@ const login: CommandSpec = {
     const { ui } = ctx;
     let key: string;
     if (parsed.flags["with-key"] === true) {
+      if (process.stdin.isTTY) {
+        throw new UsageError(
+          "--with-key reads the key from stdin, but stdin is a terminal.",
+          "Pipe it in: printenv SUME_API_KEY | opensume auth login --with-key",
+        );
+      }
       key = (await readAllStdin()).trim();
     } else {
       ui.info(`Create a key at ${ui.c.cyan(KEYS_URL)}, then paste it here.`);

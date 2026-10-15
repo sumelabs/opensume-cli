@@ -16,8 +16,10 @@ export interface Context {
   userAgent: string;
   /** Every wait goes through this, so tests can skip the clock. */
   sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
-  /** The job this command is following, so an interrupt can name it. */
+  /** The job this command is following, so an error or interrupt can name it. */
   jobId: string | undefined;
+  /** The Idempotency-Key of a submit in flight, for the same reason. */
+  idempotencyKey: string | undefined;
   client(): SumeClient;
 }
 
@@ -48,6 +50,7 @@ export function createContext(options: {
     userAgent: agent,
     sleep,
     jobId: undefined,
+    idempotencyKey: undefined,
     client() {
       client ??= new SumeClient({
         baseUrl: options.settings.baseUrl,

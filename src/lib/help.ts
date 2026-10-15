@@ -1,4 +1,5 @@
 import type { ArgSpec, CommandSpec, FlagSpec } from "./args.ts";
+import { DOCS_URL } from "./config.ts";
 import { type Palette, visibleLength, wrap } from "./ui.ts";
 
 const usageArg = (arg: ArgSpec) => {
@@ -142,7 +143,7 @@ export function renderHelp(chain: readonly CommandSpec[], c: Palette, width: num
 
   if (isRoot) {
     out.push("", `Run ${c.cyan("opensume <command> --help")} for a command's flags.`);
-    out.push(`Docs: ${c.cyan("https://api.dev.sume.com/docs")}`);
+    out.push(`Docs: ${c.cyan(DOCS_URL)}`);
   }
   return `${out.join("\n")}\n`;
 }

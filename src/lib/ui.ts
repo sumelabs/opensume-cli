@@ -188,9 +188,15 @@ class Spinner {
     this.#stream = stream;
     this.#c = c;
     this.#stream.write("\u001b[?25l");
+    // Bring the cursor back even if the process dies mid-spin (a second Ctrl-C).
+    process.once("exit", this.#restoreCursor);
     this.#timer = setInterval(() => this.#draw(), 80);
     this.#timer.unref();
   }
+
+  #restoreCursor = () => {
+    this.#stream.write("\u001b[?25h");
+  };
 
   update(text: string): void {
     this.#text = text;
@@ -206,7 +212,8 @@ class Spinner {
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = undefined;
     this.clear();
-    this.#stream.write("\u001b[?25h");
+    process.removeListener("exit", this.#restoreCursor);
+    this.#restoreCursor();
   }
 
   #draw(): void {
@@ -232,7 +239,7 @@ export function truncate(text: string, width: number): string {
       i += code[0].length;
       continue;
     }
-    if (visible === width - 1) return `${out}…\u001b[0m`;
+    if (visible === width - 1) return out.includes("\u001b[") ? `${out}…\u001b[0m` : `${out}…`;
     out += text[i];
     visible++;
     i++;
@@ -254,9 +261,10 @@ export function formatBytes(bytes: number): string {
 
 export function formatDuration(ms: number): string {
   const seconds = ms / 1000;
-  if (seconds < 60) return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ${String(Math.round(seconds % 60)).padStart(2, "0")}s`;
+  if (seconds < 10) return `${seconds.toFixed(1)}s`;
+  const whole = Math.round(seconds);
+  if (whole < 60) return `${whole}s`;
+  return `${Math.floor(whole / 60)}m ${String(whole % 60).padStart(2, "0")}s`;
 }
 
 /**

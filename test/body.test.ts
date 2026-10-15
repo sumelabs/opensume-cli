@@ -81,6 +81,17 @@ describe("buildBody", () => {
     expect(body).toEqual({ prompt: "from file", resolution: "480p", duration: 4, captions: { style: "glass" } });
   });
 
+  it("asks for --duration on lip-sync and captions models", async () => {
+    await expect(buildBody(lipsync, { video: "https://x/a.mp4", audio: "https://x/a.wav" })).rejects.toThrow(
+      "veed-lipsync needs --duration",
+    );
+    await expect(
+      buildBody(lipsync, { video: "https://x/a.mp4", audio: "https://x/a.wav", duration: 6 }),
+    ).resolves.toMatchObject({
+      duration: 6,
+    });
+  });
+
   it("reads --input - from stdin", async () => {
     const body = await buildBody(image, { input: "-" }, async () => '{"prompt":"piped"}');
     expect(body).toEqual({ prompt: "piped" });

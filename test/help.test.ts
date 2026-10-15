@@ -78,7 +78,10 @@ describe("completion", () => {
   });
 
   it("emits fish completions", () => {
-    expect(completionScript("fish", root)).toContain('complete -c opensume -n "__fish_use_subcommand" -a run');
+    const fish = completionScript("fish", root);
+    expect(fish).toContain('complete -c opensume -n "__fish_use_subcommand" -f -a run');
+    // No global -f: file names still complete for --image and friends.
+    expect(fish).not.toMatch(/^complete -c opensume -f$/mu);
   });
 });
 
@@ -86,7 +89,7 @@ describe("tables", () => {
   it("cuts rows to a terminal's width but keeps them whole in a pipe", async () => {
     const { Ui, truncate } = await import("../src/lib/ui.ts");
     const { Capture } = await import("./helpers/run-cli.ts");
-    expect(truncate("abcdefghij", 5)).toBe("abcd…\u001b[0m");
+    expect(truncate("abcdefghij", 5)).toBe("abcd…");
     expect(truncate("\u001b[1mabcdef\u001b[22m", 4)).toBe("\u001b[1mabc…\u001b[0m");
     const row = ["a-model", "video", "text, image, reference, video, audio"];
     for (const tty of [true, false]) {
@@ -97,7 +100,7 @@ describe("tables", () => {
         [row],
       );
       const line = stdout.text.split("\n")[1] ?? "";
-      expect(line.endsWith("…\u001b[0m")).toBe(tty);
+      expect(line.endsWith("…")).toBe(tty);
     }
   });
 });
@@ -110,5 +113,47 @@ describe("money", () => {
     expect(formatUsd(2)).toBe("$2.00");
     expect(formatUsd(0.0025)).toBe("$0.0025");
     expect(formatUsd(0.001)).toBe("$0.001");
+  });
+});
+
+describe("review fixes", () => {
+  it("formats durations without 60-second minutes", async () => {
+    const { formatDuration } = await import("../src/lib/ui.ts");
+    expect(formatDuration(119_600)).toBe("2m 00s");
+    expect(formatDuration(59_600)).toBe("1m 00s");
+    expect(formatDuration(9_940)).toBe("9.9s");
+  });
+
+  it("sorts pre-releases by number", async () => {
+    const { compareVersions, assetName } = await import("../src/commands/update.ts");
+    expect(compareVersions("1.0.0-beta.10", "1.0.0-beta.9")).toBe(1);
+    expect(compareVersions("1.0.0-alpha", "1.0.0-alpha.1")).toBe(-1);
+    expect(assetName("linux", "x64", true)).toBe("opensume-linux-x64-musl");
+    expect(assetName("darwin", "arm64", true)).toBe("opensume-darwin-arm64");
+  });
+
+  it("refuses unknown commands even with --help, and reads dash-led text as text", async () => {
+    expect((await runCli(["nonexistent", "--help"])).code).toBe(2);
+    const { parse } = await import("../src/lib/args.ts");
+    expect(parse(root, ["run", "m", "-a dog"]).args).toEqual(["m", "-a dog"]);
+  });
+
+  it("answers --json for command groups and completion", async () => {
+    expect((await runCli(["jobs", "--json"])).json()).toMatchObject({ command: "opensume jobs" });
+    expect((await runCli(["completion", "bash", "--json"])).json()).toMatchObject({ shell: "bash" });
+  });
+});
+
+describe("color", () => {
+  it("never writes escape codes into piped stdout", async () => {
+    const { main } = await import("../src/cli.ts");
+    const { Capture } = await import("./helpers/run-cli.ts");
+    const stdout = new Capture(false);
+    const stderr = new Capture(true);
+    await main({ argv: ["--help"], env: {}, stdout, stderr });
+    expect(stdout.text).not.toContain("\u001b[");
+    const tty = new Capture(true);
+    await main({ argv: ["--help"], env: {}, stdout: tty, stderr: new Capture(true) });
+    expect(tty.text).toContain("\u001b[1m");
   });
 });

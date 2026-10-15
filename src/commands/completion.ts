@@ -23,7 +23,9 @@ export function completionCommand(getRoot: () => CommandSpec): CommandSpec {
       const shell = parsed.args[0] as Shell;
       if (!SHELLS.includes(shell))
         throw new UsageError(`No completion for "${shell}". Pick one of: ${SHELLS.join(", ")}.`);
-      ctx.ui.out(completionScript(shell, getRoot()));
+      const script = completionScript(shell, getRoot());
+      if (ctx.json) ctx.ui.json({ shell, script });
+      else ctx.ui.out(script);
       return ExitCode.Ok;
     },
   };
@@ -76,7 +78,7 @@ export function completionScript(shell: Shell, root: CommandSpec): string {
 function posix(all: Entry[], shell: "bash" | "zsh"): string {
   const subs = all.map((e) => `    "${e.path}") echo "${e.names.join(" ")}" ;;`).join("\n");
   const words = all
-    .map((e) => `    "${e.path}") words="${[...e.commands, ...e.flags].join(" ")}"; models=${e.models ? 1 : 0} ;;`)
+    .map((e) => `    "${e.path}") candidates="${[...e.commands, ...e.flags].join(" ")}"; models=${e.models ? 1 : 0} ;;`)
     .join("\n");
   const body = `# opensume completion for ${shell}
 _opensume_subcommands() {
@@ -85,23 +87,23 @@ ${subs}
   esac
 }
 _opensume() {
-  local cur="\${COMP_WORDS[COMP_CWORD]}" path="" word i words="" models=0
+  local cur="\${COMP_WORDS[COMP_CWORD]}" cmdpath="" word i candidates="" models=0
   for ((i = 1; i < COMP_CWORD; i++)); do
     word="\${COMP_WORDS[i]}"
     [[ "$word" == -* ]] && continue
-    if [[ " $(_opensume_subcommands "$path") " == *" $word "* ]]; then
-      path="\${path:+$path }$word"
+    if [[ " $(_opensume_subcommands "$cmdpath") " == *" $word "* ]]; then
+      cmdpath="\${cmdpath:+$cmdpath }$word"
     else
       break
     fi
   done
-  case "$path" in
+  case "$cmdpath" in
 ${words}
   esac
   if [[ "$models" == 1 && "$cur" != -* ]]; then
-    words="$words $(opensume __complete models 2>/dev/null)"
+    candidates="$candidates $(opensume __complete models 2>/dev/null)"
   fi
-  COMPREPLY=($(compgen -W "$words" -- "$cur"))
+  COMPREPLY=($(compgen -W "$candidates" -- "$cur"))
 }`;
   const register = "complete -o default -F _opensume opensume";
   if (shell === "bash") return `${body}\n${register}`;
@@ -114,11 +116,12 @@ ${words}
 }
 
 function fish(all: Entry[]): string {
-  const lines = ["# opensume completion for fish", "complete -c opensume -f"];
+  // No global -f: flags such as --image and --video should still complete file names.
+  const lines = ["# opensume completion for fish"];
   for (const entry of all) {
     const words = entry.path ? entry.path.split(" ") : [];
     const condition = words.length ? `__fish_seen_subcommand_from ${words[words.length - 1]}` : "__fish_use_subcommand";
-    for (const sub of entry.commands) lines.push(`complete -c opensume -n "${condition}" -a ${sub}`);
+    for (const sub of entry.commands) lines.push(`complete -c opensume -n "${condition}" -f -a ${sub}`);
     if (!entry.path) continue;
     for (const flag of entry.flags) lines.push(`complete -c opensume -n "${condition}" -l ${flag.slice(2)}`);
     if (entry.models)

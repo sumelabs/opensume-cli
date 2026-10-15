@@ -10,6 +10,9 @@ import { CliError, ExitCode } from "./errors.ts";
  */
 export const DEFAULT_BASE_URL = "https://api.dev.sume.com";
 
+/** The Open API docs (models, jobs, errors, webhooks). */
+export const DOCS_URL = "https://open.sume.com/docs";
+
 export interface StoredConfig {
   api_key?: string;
   base_url?: string;

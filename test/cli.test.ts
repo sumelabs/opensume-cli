@@ -176,6 +176,67 @@ describe("run", () => {
     );
   });
 
+  it("checks --timeout before submitting anything", async () => {
+    for (const bad of ["5min", "0", "0s"]) {
+      const res = await cli(["run", "gpt-image-2", "a cup", "--timeout", bad, "--json"]);
+      expect(res.code).toBe(2);
+    }
+    expect(api.calls("POST", "/v1/image-router/generate")).toHaveLength(0);
+  });
+
+  it("refuses --set model, so the priced model is the submitted one", async () => {
+    const res = await cli(["run", "gpt-image-2", "a cup", "--set", "model=nano-banana-pro"]);
+    expect(res.code).toBe(2);
+    expect(res.stderr).toContain("--set cannot change the model");
+    expect(api.calls("POST", "/v1/image-router/generate")).toHaveLength(0);
+  });
+
+  it("keeps --json clean: price warnings go into the document", async () => {
+    const res = await cli([
+      "run",
+      "seedance-2-mini",
+      "a boat",
+      "-d",
+      "99",
+      "--max-usd",
+      "5",
+      "--no-download",
+      "--json",
+    ]);
+    expect(res.code).toBe(0);
+    expect(res.stderr).toBe("");
+    expect(res.json<{ warnings: string[] }>().warnings[0]).toContain("Priced for 15s, not the 99s asked");
+  });
+
+  it("names the idempotency key when the submit gives up, so a retry cannot pay twice", async () => {
+    api.failNextSubmits = { count: 10, status: 503, code: "database_busy" };
+    const res = await cli(["run", "gpt-image-2", "a cup", "--json"]);
+    expect(res.code).toBe(1);
+    const error = res.json<{ error: { code: string; idempotency_key: string } }>().error;
+    expect(error.code).toBe("database_busy");
+    expect(error.idempotency_key).toBe(api.calls("POST", "/v1/image-router/generate")[0]?.headers["idempotency-key"]);
+    const text = await cli(["run", "gpt-image-2", "a cup"]);
+    expect(text.stderr).toMatch(/rerun with --idempotency-key [0-9a-f-]{36}/u);
+  });
+
+  it("refuses a malformed key without printing it", async () => {
+    const res = await cli(["jobs", "list", "--json"], { key: "sume_live_abc\ndef_secret_tail" });
+    expect(res.code).toBe(3);
+    expect(res.stdout).not.toContain("secret_tail");
+    expect(res.json()).toMatchObject({ error: { code: "invalid_api_key" } });
+  });
+
+  it("refuses plain http except for localhost", async () => {
+    const res = await cli(["models"], { baseUrl: "http://api.example.com" });
+    expect(res.code).toBe(2);
+    expect(res.stderr).toContain("must use https");
+  });
+
+  it("treats an empty model filter as an answer, not an error", async () => {
+    expect((await cli(["models", "zzzz"], { key: null })).code).toBe(0);
+    expect((await cli(["models", "zzzz", "--json"], { key: null })).json()).toEqual([]);
+  });
+
   it("exits 3 without a valid key, before spending anything", async () => {
     expect((await cli(["run", "gpt-image-2", "a cup"], { key: null })).code).toBe(3);
     const wrong = await cli(["run", "gpt-image-2", "a cup"], { key: "sume_live_wrong" });

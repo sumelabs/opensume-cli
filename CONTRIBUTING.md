@@ -9,7 +9,7 @@ Thanks for helping. This guide covers how to set up the project, how changes get
 
 ## Set up
 
-You need Node.js 22 or newer and npm. [Bun](https://bun.sh) is only needed to build the standalone binaries.
+You need Node.js 22.6 or newer and npm (`npm run dev` relies on Node's type stripping; the built CLI runs on any Node 22). [Bun](https://bun.sh) is only needed to build the standalone binaries.
 
 ```sh
 git clone https://github.com/sumelabs/opensume-cli.git
@@ -82,9 +82,9 @@ The [Release workflow](.github/workflows/release.yml) then:
 
 1. Checks that the tag, `package.json` and the changelog agree.
 2. Runs every check.
-3. Builds and smoke-tests a binary on each platform.
+3. Builds and smoke-tests a binary on each platform (musl builds inside Alpine).
 4. Publishes the binaries with `checksums.txt`, build provenance and the changelog section as release notes.
-5. Installs the release with both install scripts to prove they work.
+5. Installs the release with `install.sh` (macOS, Ubuntu, Alpine), `install.ps1` (PowerShell 7 and Windows PowerShell 5.1) and npm, to prove each path works.
 
 To rehearse a release without publishing anything, run the workflow by hand with **dry run** checked.
 

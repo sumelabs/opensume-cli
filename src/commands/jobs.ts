@@ -3,7 +3,7 @@ import type { Context } from "../context.ts";
 import type { CommandSpec } from "../lib/args.ts";
 import { ExitCode } from "../lib/errors.ts";
 import { formatAge, formatDuration } from "../lib/ui.ts";
-import { followJob, jobRow, WAIT_FLAGS } from "./shared.ts";
+import { followJob, jobRow, timeoutFlag, WAIT_FLAGS } from "./shared.ts";
 
 const STATES = ["queued", "processing", "completed", "failed", "canceled"] as const;
 const jobArg = [{ name: "id", required: true, description: "The job id (job_…)" }] as const;
@@ -134,11 +134,13 @@ const wait: CommandSpec = {
   examples: ["opensume jobs wait job_7513b52d-3669-4ffe-b317-8b02000715eb -o ./out/"],
   run: async (parsed, ctx) => {
     const id = parsed.args[0] as string;
+    const timeoutMs = timeoutFlag(parsed.flags as Record<string, unknown>);
     const job = await ctx.client().getJob(id, ctx.signal);
     return followJob(ctx, {
       jobId: job.id,
       model: job.model,
       startedAt: Date.parse(job.created_at) || Date.now(),
+      timeoutMs,
       firstDelaySeconds: 0,
       jobTime: true,
       flags: parsed.flags as Record<string, unknown>,

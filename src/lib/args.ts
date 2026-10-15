@@ -55,7 +55,9 @@ export interface CommandSpec {
   readonly run?: (parsed: Parsed, ctx: Context) => Promise<number | undefined>;
 }
 
-const isFlagToken = (token: string) => token.startsWith("-") && token !== "-" && !/^-\d/u.test(token);
+// Flags never contain whitespace, so "-a dog" is text (a prompt), not a flag.
+const isFlagToken = (token: string) =>
+  token.startsWith("-") && token !== "-" && !/^-\d/u.test(token) && !/\s/u.test(token);
 
 export function findSubcommand(command: CommandSpec, name: string): CommandSpec | undefined {
   return command.commands?.find((c) => c.name === name || c.aliases?.includes(name));
@@ -155,11 +157,12 @@ export function parse(root: CommandSpec, argv: readonly string[]): Parsed {
   }
 
   const command = leaf();
-  if (!flags.help) checkArgs(command, args, path);
+  checkArgs(command, args, path, flags.help === true);
   return { command, path, args, flags };
 }
 
-function checkArgs(command: CommandSpec, args: string[], path: string[]) {
+/** Unknown subcommands are errors even with --help; missing arguments are not. */
+function checkArgs(command: CommandSpec, args: string[], path: string[], help: boolean) {
   const specs = command.args ?? [];
   if (!command.run && command.commands?.length) {
     if (args.length > 0) {
@@ -172,6 +175,7 @@ function checkArgs(command: CommandSpec, args: string[], path: string[]) {
     }
     return;
   }
+  if (help) return;
   const required = specs.filter((a) => a.required).length;
   const variadic = specs.some((a) => a.variadic);
   if (args.length < required) {
@@ -210,7 +214,8 @@ function unknownFlag(token: string, known: FlagSpec[], path: string[]): UsageErr
   const bare = token.split("=")[0] as string;
   return new UsageError(
     `Unknown flag ${bare}${path.length ? ` for "opensume ${path.join(" ")}"` : ""}.`,
-    suggestionLine(bare, names) ?? `Run \`opensume ${[...path, "--help"].join(" ")}\` to see the flags.`,
+    suggestionLine(bare, names) ??
+      `Run \`opensume ${[...path, "--help"].join(" ")}\` to see the flags. Text that starts with "-" goes after --.`,
   );
 }
 

@@ -12,7 +12,7 @@ export const estimate: CommandSpec = {
   group: "Generate",
   summary: "Price a request in dollars before running it",
   description:
-    "Prices the same request `opensume run` would send, with the same flags, and submits nothing. " +
+    "Prices the same request `opensume run` would send, with the same input flags, and submits nothing. " +
     "The answer is what an open.sume.com key is charged. No key needed.",
   args: [
     { name: "model", required: true, complete: "models", description: "A model id from `opensume models`" },

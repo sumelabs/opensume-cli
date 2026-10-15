@@ -21,7 +21,7 @@ permissions:
 jobs:
   check:
     name: Check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -54,8 +54,10 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - { target: linux-x64, runner: ubuntu-latest }
+          - { target: linux-x64, runner: ubuntu-24.04 }
           - { target: linux-arm64, runner: ubuntu-24.04-arm }
+          - { target: linux-x64-musl, runner: ubuntu-24.04 }
+          - { target: linux-arm64-musl, runner: ubuntu-24.04-arm }
           - { target: darwin-x64, runner: macos-15-intel }
           - { target: darwin-arm64, runner: macos-latest }
           - { target: windows-x64, runner: windows-latest }
@@ -72,8 +74,12 @@ jobs:
         run: |
           bin=dist/bin/opensume-${{ matrix.target }}
           [ -f "$bin.exe" ] && bin="$bin.exe"
-          test "$("$bin" --version)" = "opensume $VERSION"
-          "$bin" --help > /dev/null
+          case "$bin" in
+            *-musl) run() { docker run --rm -v "$PWD/dist/bin:/b" alpine:3.22 "/b/${bin##*/}" "$@"; } ;;
+            *) run() { "$bin" "$@"; } ;;
+          esac
+          test "$(run --version)" = "opensume $VERSION"
+          run --help > /dev/null
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: opensume-${{ matrix.target }}
@@ -83,7 +89,7 @@ jobs:
   pack:
     name: npm package
     needs: check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -91,18 +97,25 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm pack
+      - name: Pack, plus a copy under a stable name for releases/latest/download/opensume.tgz
+        run: |
+          npm pack
+          cp opensume-*.tgz opensume.tgz
+      - name: Smoke a global install of the package
+        run: |
+          npm install -g --prefix "$RUNNER_TEMP/npm" ./opensume.tgz
+          "$RUNNER_TEMP/npm/bin/opensume" --version
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: npm-package
-          path: opensume-*.tgz
+          path: opensume*.tgz
           if-no-files-found: error
 
   release:
     name: Publish
     if: ${{ github.event_name == 'push' || !inputs.dry_run }}
     needs: [check, build, pack]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       id-token: write
@@ -116,11 +129,11 @@ jobs:
       - name: Checksums
         working-directory: assets
         run: |
-          sha256sum opensume-* > checksums.txt
+          sha256sum opensume* > checksums.txt
           cat checksums.txt
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: assets/opensume-*
+          subject-path: assets/opensume*
       - name: Release notes from CHANGELOG.md
         env:
           VERSION: ${{ needs.check.outputs.version }}
@@ -140,13 +153,13 @@ jobs:
           files: assets/*
 
   verify:
-    name: Install ${{ matrix.os }}
+    name: Verify install
     needs: [check, release]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: install.sh
@@ -157,12 +170,37 @@ jobs:
         run: |
           sh install.sh
           test "$("$HOME/.opensume/bin/opensume" --version)" = "opensume $OPENSUME_VERSION"
-      - name: install.ps1
+      - name: install.ps1 (PowerShell 7)
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           OPENSUME_VERSION: ${{ needs.check.outputs.version }}
         run: |
-          ./install.ps1
+          Get-Content -Raw ./install.ps1 | Invoke-Expression
           $out = & "$env:LOCALAPPDATA\opensume\bin\opensume.exe" --version
           if ($out -ne "opensume $env:OPENSUME_VERSION") { throw "got: $out" }
+      - name: install.ps1 again (Windows PowerShell 5.1, over the existing install)
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          OPENSUME_VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          Get-Content -Raw ./install.ps1 | Invoke-Expression
+          $out = & "$env:LOCALAPPDATA\opensume\bin\opensume.exe" --version
+          if ($out -ne "opensume $env:OPENSUME_VERSION") { throw "got: $out" }
+          $raw = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment').GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+          if (-not (($raw -split ';') -contains "$env:LOCALAPPDATA\opensume\bin")) { throw "PATH was not updated: $raw" }
+      - name: install.sh on Alpine (musl)
+        if: runner.os == 'Linux'
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          docker run --rm -v "$PWD:/w" -e OPENSUME_VERSION="$VERSION" -e OPENSUME_NO_MODIFY_PATH=1 alpine:3.22 \
+            sh -c 'apk add --no-cache curl >/dev/null && sh /w/install.sh && test "$("$HOME/.opensume/bin/opensume" --version)" = "opensume $OPENSUME_VERSION"'
+      - name: npm install from the release
+        if: runner.os == 'Linux'
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          npm install -g --prefix "$RUNNER_TEMP/npm" "https://github.com/${GITHUB_REPOSITORY}/releases/download/v$VERSION/opensume.tgz"
+          test "$("$RUNNER_TEMP/npm/bin/opensume" --version)" = "opensume $VERSION"

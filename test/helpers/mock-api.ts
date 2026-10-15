@@ -174,7 +174,8 @@ export class MockApi {
     if (req.method === "POST" && path === "/v1/open/estimate") {
       const model = MODELS.find((m) => m.id === body?.model);
       if (!model) return error(404, "model_not_found");
-      const duration = Number(body.input?.duration ?? 0);
+      // Like the real estimate, a duration past the model's limit is priced at the limit.
+      const duration = Math.min(Number(body.input?.duration ?? 0), 15);
       const usd = model.kind === "image" ? 0.0077 : 0.0879 * Math.max(duration, 1);
       return send(200, {
         data: {

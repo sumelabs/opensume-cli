@@ -43,6 +43,9 @@ const EXTENSIONS: Record<string, string> = {
   "application/json": ".json",
 };
 
+/** Every file extension the CLI can upload, for messages. */
+export const MEDIA_EXTENSIONS = Object.keys(TYPES);
+
 export function contentTypeFor(path: string): string | undefined {
   return TYPES[extname(path).toLowerCase()];
 }

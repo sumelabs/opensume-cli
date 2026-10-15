@@ -22,12 +22,12 @@
 - **Every open.sume.com model behind one key.** Images, video, lip-sync and captions, with prices from `opensume models`.
 - **Know the price first.** `opensume estimate` is free and needs no key. `--max-usd` refuses anything over budget.
 - **Local files just work.** Pass `--image ./photo.png`; it is uploaded for you.
-- **Safe to retry.** Every submit carries an idempotency key, so a retried submit never pays twice.
+- **Safe to retry.** Submits carry an idempotency key, the CLI's own retries reuse it, and an error after a submit names the key or the job, so a retry never pays twice.
 - **Made for scripts and agents.** `--json` everywhere, documented exit codes, a machine-readable command list, and an [agent skill](skills/opensume/SKILL.md).
 - **One self-contained binary.** No runtime to install, no dependencies, no telemetry, no background update checks.
 
 > [!NOTE]
-> open.sume.com and its API are in preview. The CLI talks to `https://api.dev.sume.com`, where the [API docs](https://api.dev.sume.com/docs) live. Set `SUME_API_BASE_URL` to point it elsewhere.
+> open.sume.com and its API are in preview. The CLI talks to the API at `https://api.dev.sume.com`; the [API docs](https://open.sume.com/docs) are on open.sume.com. Set `SUME_API_BASE_URL` to point the CLI elsewhere.
 
 ## Contents
 
@@ -56,12 +56,12 @@ curl -fsSL https://raw.githubusercontent.com/sumelabs/opensume-cli/main/install.
 irm https://raw.githubusercontent.com/sumelabs/opensume-cli/main/install.ps1 | iex
 ```
 
-Both scripts download the binary for your platform from the [latest release](https://github.com/sumelabs/opensume-cli/releases/latest), check it against the release's SHA-256 checksums, and put it on your `PATH` (`~/.opensume/bin`, or `%LOCALAPPDATA%\opensume\bin` on Windows). Set `OPENSUME_VERSION=0.1.0` to pin a version, `OPENSUME_INSTALL_DIR` to choose the folder, or `OPENSUME_NO_MODIFY_PATH=1` to leave your shell profile alone.
+Both scripts download the binary for your platform from the [latest release](https://github.com/sumelabs/opensume-cli/releases/latest), check it against the release's SHA-256 checksums, and put it on your `PATH` (`~/.opensume/bin`, or `%LOCALAPPDATA%\opensume\bin` on Windows). Builds exist for macOS (Apple silicon and Intel), Linux (x64 and arm64, glibc and musl/Alpine) and Windows x64. Set `OPENSUME_VERSION=0.1.0` to pin a version, `OPENSUME_INSTALL_DIR` to choose the folder, or `OPENSUME_NO_MODIFY_PATH=1` to leave your `PATH` alone.
 
 **With Node.js 22 or newer**
 
 ```sh
-npm install -g github:sumelabs/opensume-cli
+npm install -g https://github.com/sumelabs/opensume-cli/releases/latest/download/opensume.tgz
 ```
 
 **From source**
@@ -189,7 +189,7 @@ $ opensume estimate seedance-2-mini "a paper boat" -d 4 -r 480p
 $0.3516  seedance-2-mini · 4s · 480p · 40.176 × 1000 video tokens
 ```
 
-`estimate` takes the same flags as `run` and submits nothing. Local files are not uploaded to price a request. If the API prices something other than what you asked for, `estimate` says so. A 99-second request on a 15-second model, for example, is priced as 15 seconds.
+`estimate` takes the same input flags as `run` and submits nothing. Local files are not uploaded to price a request. If the API prices something other than what you asked for, `estimate` says so. A 99-second request on a 15-second model, for example, is priced as 15 seconds.
 
 ### upload
 
@@ -234,7 +234,7 @@ open.sume.com keys pay in US dollars from your open.sume.com balance; top up und
 - **Before you submit:** `opensume estimate` and `opensume run --dry-run` show the price for free. The estimate is what a completed job is charged.
 - **When you submit:** the price is reserved. With `--max-usd`, the CLI checks the estimate first and submits nothing if the price is higher (exit code 7).
 - **When the job ends:** a completed job is charged; a failed or canceled job is refunded.
-- **Retries never double-charge:** every submit carries an `Idempotency-Key`, and a retried submit returns the original job.
+- **Retries never double-charge:** every submit carries an `Idempotency-Key`, and a retried submit returns the original job. If the CLI gives up on a submit, the error prints the key (`idempotency_key` in `--json`); rerun with `--idempotency-key <key>` to adopt the job rather than create another.
 
 ## Scripts and agents
 
@@ -325,6 +325,7 @@ opensume run  ──▶  POST /v1/{image,video}-router/generate   202 + job id, 
 |---|---|
 | `No API key` (exit 3) | `opensume auth login`, or export `SUME_API_KEY`. |
 | `Missing or invalid API key` (exit 3) | The key is wrong or revoked. Create a new one at open.sume.com → API keys. |
+| `The API key contains spaces, line breaks…` (exit 3) | The key was pasted with extra characters. Copy it again. |
 | `open_key_route_not_allowed` (exit 3) | open.sume.com keys call images, video, jobs and prices only. |
 | `Balance too low` (exit 7) | Top up at open.sume.com → Billing. The error shows the price and your balance. |
 | `concurrency_limit_reached` (exit 8) | Your workspace has as many jobs in flight as it may. Wait for one to finish. |
@@ -337,7 +338,7 @@ opensume run  ──▶  POST /v1/{image,video}-router/generate   202 + job id, 
 rm -rf ~/.opensume ~/.config/opensume ~/.cache/opensume   # binary, saved key, completion cache
 ```
 
-Then remove the `# opensume` line from your shell profile. On Windows, delete `%LOCALAPPDATA%\opensume` and `%APPDATA%\opensume`, and remove the folder from your user `PATH`. If you installed with npm: `npm uninstall -g opensume`.
+Then remove the two lines the installer added to your shell profile (`# opensume` and the `export PATH=…` under it), or `~/.config/fish/conf.d/opensume.fish` for fish. On Windows, delete `%LOCALAPPDATA%\opensume` and `%APPDATA%\opensume`, and remove the folder from your user `PATH`. If you installed with npm: `npm uninstall -g opensume`.
 
 ## Contributing
 

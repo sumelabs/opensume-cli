@@ -44,13 +44,14 @@ opensume run kling-3 "…" -d 5 --no-wait --json        # returns {"job": {"id":
 opensume jobs wait job_… -o ./out/ --json              # later: waits and saves
 ```
 
-If a wait is interrupted or times out (exit 6), the job keeps running. Resume it with `opensume jobs wait <id>`. Do not resubmit: a second submit is a second charge.
+If a wait times out (exit 6) or is interrupted (exit 130), the job keeps running. Resume it with `opensume jobs wait <id>`; the error names the job. Do not resubmit: a second submit is a second charge. If the submit itself failed, the error carries `idempotency_key`; pass it back with `--idempotency-key` to adopt the job if it was created.
 
 ## Exit codes
 
 | Code | Meaning | What to do |
 |---|---|---|
 | 0 | Done | |
+| 1 | Network or server error | Retry; for a failed submit, pass back its `idempotency_key` |
 | 2 | Bad command line | Fix the flags; see `opensume <command> --help` |
 | 3 | Key missing, wrong or not allowed | Ask the user for a valid open.sume.com key |
 | 4 | The API refused the request | Read `error.message` and `error.details`, fix the input |
@@ -58,5 +59,6 @@ If a wait is interrupted or times out (exit 6), the job keeps running. Resume it
 | 6 | Timed out waiting | `opensume jobs wait <id>` |
 | 7 | Balance too low, or over `--max-usd` | Tell the user |
 | 8 | Rate limit or concurrency cap | Wait for running jobs, then retry |
+| 130 | Interrupted | `opensume jobs wait <id>` with the id the error names |
 
 With `--json`, errors are `{"error": {"code", "message", "hint", "status", "request_id"}}`. Quote `request_id` when the user needs support.

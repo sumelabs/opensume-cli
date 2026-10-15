@@ -125,6 +125,18 @@ export async function buildBody(
   set("webhook_url", flags.webhook);
 
   for (const entry of flags.set ?? []) applySet(body, entry);
+  delete body.model;
+  // Lip-sync and captions are billed by the clip's length, which the API
+  // requires up front; without it the price is refused with no hint why.
+  if (
+    (model.kind === "lipsync" || model.kind === "captions") &&
+    body.duration === undefined &&
+    body.duration_seconds === undefined
+  ) {
+    throw new UsageError(
+      `${model.id} needs --duration: the clip's length in whole seconds${model.kind === "lipsync" ? " (the audio's, for a photo)" : ""}.`,
+    );
+  }
   return body;
 }
 
@@ -149,6 +161,9 @@ export function applySet(body: Record<string, unknown>, entry: string): void {
   if (path.includes("__proto__") || path.includes("constructor") || path.includes("prototype")) {
     throw new UsageError(`--set key "${key}" is not allowed.`);
   }
+  if (path.length === 1 && path[0] === "model") {
+    throw new UsageError("--set cannot change the model; it is the first argument of the command.");
+  }
   const value = parseValue(raw);
   let target = body;
   for (const part of path.slice(0, -1)) {
@@ -171,6 +186,7 @@ export function applySet(body: Record<string, unknown>, entry: string): void {
 export function parseValue(raw: string): unknown {
   const trimmed = raw.trim();
   if (trimmed === "") return "";
+  if (/^-?\d+$/u.test(trimmed) && !Number.isSafeInteger(Number(trimmed))) return trimmed;
   if (/^(-?\d+(\.\d+)?([eE][+-]?\d+)?|true|false|null)$/u.test(trimmed) || /^[[{"]/u.test(trimmed)) {
     try {
       return JSON.parse(trimmed);

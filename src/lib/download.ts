@@ -82,6 +82,9 @@ export async function planPaths(artifacts: readonly Artifact[], options: PlanOpt
   return exts.map((ext, i) => (i === 0 ? `${base}${given || ext}` : `${base}-${i + 1}${ext}`));
 }
 
+/** A whole download or upload may take this long; a stalled one is retried. */
+export const TRANSFER_TIMEOUT_MS = 15 * 60_000;
+
 export interface DownloadOptions {
   userAgent: string;
   signal?: AbortSignal | undefined;
@@ -101,9 +104,10 @@ export async function downloadTo(url: string, path: string, options: DownloadOpt
   const part = `${path}.part`;
   for (let attempt = 1; ; attempt++) {
     try {
+      const timeout = AbortSignal.timeout(TRANSFER_TIMEOUT_MS);
       const res = await fetcher(url, {
         headers: { "user-agent": options.userAgent },
-        signal: options.signal ?? null,
+        signal: options.signal ? AbortSignal.any([options.signal, timeout]) : timeout,
         redirect: "follow",
       });
       if (!res.ok || !res.body) {
@@ -112,7 +116,9 @@ export async function downloadTo(url: string, path: string, options: DownloadOpt
       }
       await pipeline(Readable.fromWeb(res.body as WebReadableStream<Uint8Array>), createWriteStream(part));
       const bytes = (await stat(part)).size;
-      const expected = Number(res.headers.get("content-length"));
+      // Content-Length counts the bytes on the wire; a compressed response
+      // decodes to more, so the check only holds for an uncompressed one.
+      const expected = res.headers.get("content-encoding") ? Number.NaN : Number(res.headers.get("content-length"));
       if (Number.isFinite(expected) && expected > 0 && expected !== bytes) {
         throw Object.assign(new Error(`got ${bytes} of ${expected} bytes`), { retryable: true });
       }
@@ -121,7 +127,8 @@ export async function downloadTo(url: string, path: string, options: DownloadOpt
     } catch (error) {
       await rm(part, { force: true });
       if (options.signal?.aborted) throw error;
-      const retryable = (error as { retryable?: boolean }).retryable ?? true;
+      const timedOut = (error as Error).name === "TimeoutError";
+      const retryable = timedOut || ((error as { retryable?: boolean }).retryable ?? true);
       if (attempt < attempts && retryable) {
         await (options.sleep ?? sleep)(backoffMs(attempt), options.signal);
         continue;

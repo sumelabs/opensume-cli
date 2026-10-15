@@ -2,8 +2,9 @@ import { readFile, stat } from "node:fs/promises";
 import { basename } from "node:path";
 import type { SumeClient } from "../api/client.ts";
 import type { Asset } from "../api/types.ts";
+import { TRANSFER_TIMEOUT_MS } from "./download.ts";
 import { CliError, ExitCode } from "./errors.ts";
-import { contentTypeFor } from "./media.ts";
+import { contentTypeFor, MEDIA_EXTENSIONS } from "./media.ts";
 
 export interface UploadedFile {
   path: string;
@@ -36,7 +37,7 @@ export async function uploadFile(
     throw new CliError(`Cannot tell the media type of ${path} from its extension.`, {
       exitCode: ExitCode.Usage,
       code: "unknown_media_type",
-      hint: "Use a .png, .jpg, .webp, .mp4, .mov, .mp3, .wav or .m4a file, or pass a public https URL.",
+      hint: `Use one of ${MEDIA_EXTENSIONS.join(" ")}, or pass a public https URL.`,
     });
   }
 
@@ -45,12 +46,25 @@ export async function uploadFile(
     options.signal,
   );
   const bytes = await readFile(path);
-  const put = await (options.fetch ?? globalThis.fetch)(target.upload.url, {
-    method: target.upload.method || "PUT",
-    headers: target.upload.headers ?? { "content-type": contentType },
-    body: bytes,
-    signal: options.signal ?? null,
-  });
+  const timeout = AbortSignal.timeout(TRANSFER_TIMEOUT_MS);
+  let put: Response;
+  try {
+    // The presigned URL is never printed: it grants write access until it expires.
+    put = await (options.fetch ?? globalThis.fetch)(target.upload.url, {
+      method: target.upload.method || "PUT",
+      headers: target.upload.headers ?? { "content-type": contentType },
+      body: bytes,
+      signal: options.signal ? AbortSignal.any([options.signal, timeout]) : timeout,
+    });
+  } catch (cause) {
+    if (options.signal?.aborted) throw cause;
+    const reason = (cause as Error).name === "TimeoutError" ? "timed out" : "the connection failed";
+    throw new CliError(`Uploading ${basename(path)} failed: ${reason}.`, {
+      code: "network_error",
+      hint: "Check your connection and run the command again.",
+      cause,
+    });
+  }
   if (!put.ok) {
     throw new CliError(`Uploading ${basename(path)} failed: storage answered ${put.status}.`, {
       code: "upload_failed",

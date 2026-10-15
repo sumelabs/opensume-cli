@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readdirSync } from "node:fs";
 import { chmod, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { Context } from "../context.ts";
@@ -7,6 +8,7 @@ import { CliError, ExitCode } from "../lib/errors.ts";
 import { VERSION } from "../version.ts";
 
 export const REPO = "sumelabs/opensume-cli";
+const NPM_TARBALL = `https://github.com/${REPO}/releases/latest/download/opensume.tgz`;
 
 export const update: CommandSpec = {
   name: "update",
@@ -45,11 +47,11 @@ export const update: CommandSpec = {
       ui.info(
         `opensume ${latest} is available (you have ${VERSION}). This copy was not installed as a standalone binary;`,
       );
-      ui.info(`update it the way you installed it, for example: npm install -g github:${REPO}`);
+      ui.info(`update it the way you installed it, for example: npm install -g ${NPM_TARBALL}`);
       return ExitCode.Ok;
     }
 
-    const asset = assetName(process.platform, process.arch);
+    const asset = assetName(process.platform, process.arch, isMusl());
     const base = `https://github.com/${REPO}/releases/download/v${latest}`;
     ui.spin(`Downloading opensume ${latest}`);
     const [binary, sums] = await Promise.all([
@@ -72,12 +74,23 @@ export const update: CommandSpec = {
 };
 
 /** The release asset for this machine, matching install.sh and the release workflow. */
-export function assetName(platform: NodeJS.Platform, arch: string): string {
+export function assetName(platform: NodeJS.Platform, arch: string, musl = false): string {
   const os = platform === "win32" ? "windows" : platform;
   if (!["darwin", "linux", "windows"].includes(os) || !["x64", "arm64"].includes(arch)) {
     throw new CliError(`No prebuilt binary for ${platform} ${arch}.`, { code: "unsupported_platform" });
   }
-  return `opensume-${os}-${arch}${os === "windows" ? ".exe" : ""}`;
+  if (os === "windows" && arch !== "x64") return "opensume-windows-x64.exe";
+  return `opensume-${os}-${arch}${os === "linux" && musl ? "-musl" : ""}${os === "windows" ? ".exe" : ""}`;
+}
+
+/** Alpine and other musl systems need the musl build; glibc ones cannot run it. */
+export function isMusl(): boolean {
+  if (process.platform !== "linux") return false;
+  try {
+    return readdirSync("/lib").some((name) => name.startsWith("ld-musl-"));
+  } catch {
+    return false;
+  }
 }
 
 export function parseChecksums(text: string): Map<string, string> {
@@ -89,11 +102,11 @@ export function parseChecksums(text: string): Map<string, string> {
   return sums;
 }
 
-/** -1, 0 or 1. Pre-release versions sort before their release. */
+/** -1, 0 or 1, by semver precedence: a pre-release sorts before its release. */
 export function compareVersions(a: string, b: string): number {
   const parse = (v: string) => {
-    const [core = "", pre = ""] = v.replace(/^v/u, "").split("-", 2);
-    return { parts: core.split(".").map((n) => Number.parseInt(n, 10) || 0), pre };
+    const [core = "", ...rest] = v.replace(/^v/u, "").split("-");
+    return { parts: core.split(".").map((n) => Number.parseInt(n, 10) || 0), pre: rest.join("-") };
   };
   const x = parse(a);
   const y = parse(b);
@@ -104,7 +117,20 @@ export function compareVersions(a: string, b: string): number {
   if (x.pre === y.pre) return 0;
   if (!x.pre) return 1;
   if (!y.pre) return -1;
-  return x.pre < y.pre ? -1 : 1;
+  const xs = x.pre.split(".");
+  const ys = y.pre.split(".");
+  for (let i = 0; i < Math.max(xs.length, ys.length); i++) {
+    const p = xs[i];
+    const q = ys[i];
+    if (p === undefined) return -1;
+    if (q === undefined) return 1;
+    const pn = /^\d+$/u.test(p);
+    const qn = /^\d+$/u.test(q);
+    if (pn && qn && Number(p) !== Number(q)) return Math.sign(Number(p) - Number(q));
+    if (pn !== qn) return pn ? -1 : 1;
+    if (p !== q) return p < q ? -1 : 1;
+  }
+  return 0;
 }
 
 /** True for the single-file binaries the release workflow builds with Bun. */
@@ -144,18 +170,22 @@ async function fetchBytes(ctx: Context, url: string): Promise<Buffer> {
 async function replaceExecutable(target: string, bytes: Buffer): Promise<void> {
   const dir = dirname(target);
   const staged = join(dir, `.${basename(target)}.new`);
-  await writeFile(staged, bytes, { mode: 0o755 });
+  const old = `${target}.old`;
+  let movedAside = false;
   try {
+    await writeFile(staged, bytes, { mode: 0o755 });
     if (process.platform === "win32") {
-      const old = `${target}.old`;
       await rm(old, { force: true });
       await rename(target, old);
+      movedAside = true;
     }
     await rename(staged, target);
     await chmod(target, 0o755).catch(() => {});
   } catch (cause) {
-    await rm(staged, { force: true });
-    throw new CliError(`Could not replace ${target}. Is it writable?`, {
+    await rm(staged, { force: true }).catch(() => {});
+    // Never leave the user without a binary: put the old one back.
+    if (movedAside) await rename(old, target).catch(() => {});
+    throw new CliError(`Could not replace ${target}. Is its folder writable?`, {
       code: "update_failed",
       cause,
       exitCode: ExitCode.Error,

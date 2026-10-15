@@ -11,7 +11,7 @@ import { upload } from "./commands/upload.ts";
 import { version, versionInfo } from "./commands/version.ts";
 import { createContext } from "./context.ts";
 import { type CommandSpec, findSubcommand, type Parsed, parse } from "./lib/args.ts";
-import { DEFAULT_BASE_URL, resolveSettings } from "./lib/config.ts";
+import { DEFAULT_BASE_URL, DOCS_URL, resolveSettings } from "./lib/config.ts";
 import { CliError, ExitCode, UsageError } from "./lib/errors.ts";
 import { renderHelp } from "./lib/help.ts";
 import { colorEnabled, type Stream, Ui } from "./lib/ui.ts";
@@ -73,11 +73,15 @@ export async function main(options: MainOptions): Promise<number> {
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
   const wantsJson = options.argv.includes("--json");
+  // Color only when both streams are terminals, so no escape code ever lands
+  // in a pipe or a file (results go to stdout, progress to stderr).
+  const color = (off: boolean) =>
+    colorEnabled(stderr, env, off ? false : undefined) && colorEnabled(stdout, env, off ? false : undefined);
   // Before parsing succeeds, report errors the way the flags ask for.
   let ui = new Ui({
     stdout,
     stderr,
-    color: colorEnabled(stderr, env, options.argv.includes("--no-color") ? false : undefined),
+    color: color(options.argv.includes("--no-color")),
     interactive: false,
     quiet: false,
     verbose: false,
@@ -95,7 +99,7 @@ export async function main(options: MainOptions): Promise<number> {
   ui = new Ui({
     stdout,
     stderr,
-    color: colorEnabled(stderr, env, flags["no-color"] === true ? false : undefined),
+    color: color(flags["no-color"] === true),
     interactive: !quiet && Boolean(stderr.isTTY) && env.CI === undefined,
     quiet,
     verbose: flags.verbose === true,
@@ -116,7 +120,9 @@ export async function main(options: MainOptions): Promise<number> {
     }
     if (!parsed.command.run) {
       // A command group with no subcommand (`opensume jobs`) shows its help.
-      ui.out(renderHelp(chainFor(parsed.path), ui.c, ui.width).trimEnd());
+      const chain = chainFor(parsed.path);
+      if (json) ui.json(manifest(chain));
+      else ui.out(renderHelp(chain, ui.c, ui.width).trimEnd());
       return ExitCode.Ok;
     }
 
@@ -125,7 +131,14 @@ export async function main(options: MainOptions): Promise<number> {
       env,
     );
     const controller = new AbortController();
-    const onSigint = () => controller.abort(Object.assign(new Error("Interrupted."), { name: "AbortError" }));
+    const onSigint = () => {
+      controller.abort(Object.assign(new Error("Interrupted."), { name: "AbortError" }));
+      // A second Ctrl-C quits at once, with the terminal's cursor restored.
+      process.once("SIGINT", () => {
+        ui.stopSpinner();
+        process.exit(ExitCode.Interrupted);
+      });
+    };
     if (!options.signal) process.once("SIGINT", onSigint);
     options.signal?.addEventListener("abort", () => controller.abort(options.signal?.reason), { once: true });
     const ctx = createContext({
@@ -141,8 +154,8 @@ export async function main(options: MainOptions): Promise<number> {
     try {
       return (await parsed.command.run(parsed, ctx)) ?? ExitCode.Ok;
     } catch (error) {
-      if (controller.signal.aborted) return interrupted(ui, json, ctx.jobId);
-      throw error;
+      if (controller.signal.aborted) return interrupted(ui, json, ctx);
+      return report(ui, error, json, ctx);
     } finally {
       process.removeListener("SIGINT", onSigint);
     }
@@ -151,6 +164,26 @@ export async function main(options: MainOptions): Promise<number> {
   } finally {
     ui.stopSpinner();
   }
+}
+
+/** What an error after a submit must still tell the person: how to get the job back. */
+interface JobContext {
+  jobId?: string | undefined;
+  idempotencyKey?: string | undefined;
+}
+
+function jobFields(job: JobContext | undefined): Record<string, string> {
+  if (job?.jobId) return { job_id: job.jobId };
+  if (job?.idempotencyKey) return { idempotency_key: job.idempotencyKey };
+  return {};
+}
+
+function jobHint(job: JobContext | undefined): string | undefined {
+  if (job?.jobId) return `Job ${job.jobId} was created. Check on it with: opensume jobs wait ${job.jobId}`;
+  if (job?.idempotencyKey) {
+    return `If the submit went through, rerun with --idempotency-key ${job.idempotencyKey} to get that job back instead of paying again.`;
+  }
+  return undefined;
 }
 
 function chainFor(names: readonly string[]): CommandSpec[] {
@@ -163,20 +196,23 @@ function chainFor(names: readonly string[]): CommandSpec[] {
   return chain;
 }
 
-function interrupted(ui: Ui, json: boolean, jobId: string | undefined): number {
+function interrupted(ui: Ui, json: boolean, job: JobContext): number {
   ui.stopSpinner();
   if (json) {
-    ui.json({ error: { code: "interrupted", message: "Interrupted.", ...(jobId ? { job_id: jobId } : {}) } });
-  } else if (jobId) {
-    ui.error(`Stopped waiting. Job ${jobId} keeps running on Sume.`, `Pick it up with: opensume jobs wait ${jobId}`);
+    ui.json({ error: { code: "interrupted", message: "Interrupted.", ...jobFields(job) } });
+  } else if (job.jobId) {
+    ui.error(
+      `Stopped waiting. Job ${job.jobId} keeps running on Sume.`,
+      `Pick it up with: opensume jobs wait ${job.jobId}`,
+    );
   } else {
-    ui.error("Interrupted.");
+    ui.error("Interrupted.", jobHint(job));
   }
   return ExitCode.Interrupted;
 }
 
 /** Print an error the way the output mode asks for, and pick the exit code. */
-function report(ui: Ui, error: unknown, json: boolean): number {
+function report(ui: Ui, error: unknown, json: boolean, job?: JobContext): number {
   ui.stopSpinner();
   if (error instanceof CliError) {
     const lines = error instanceof ApiError ? error.fieldErrors() : [];
@@ -194,19 +230,23 @@ function report(ui: Ui, error: unknown, json: boolean): number {
                 ...(error.details !== undefined ? { details: error.details } : {}),
               }
             : {}),
+          ...jobFields(job),
         },
       });
     } else {
       const detail = lines.length ? `\n${lines.map((l) => `  • ${l}`).join("\n")}` : "";
       const requestId = error instanceof ApiError && error.requestId ? ` (request ${error.requestId})` : "";
-      ui.error(`${error.message}${requestId}${detail}`, error.hint);
+      ui.error(`${error.message}${requestId}${detail}`, [error.hint, jobHint(job)].filter(Boolean).join("\n  "));
     }
     return error.exitCode;
   }
   const message = error instanceof Error ? error.message : String(error);
-  if (json) ui.json({ error: { code: "internal_error", message } });
+  if (json) ui.json({ error: { code: "internal_error", message, ...jobFields(job) } });
   else {
-    ui.error(`Unexpected error: ${message}`, "Please report it: https://github.com/sumelabs/opensume-cli/issues");
+    ui.error(
+      `Unexpected error: ${message}`,
+      [jobHint(job), "Please report it: https://github.com/sumelabs/opensume-cli/issues"].filter(Boolean).join("\n  "),
+    );
     if (error instanceof Error && error.stack && ui.options.verbose) ui.debug(error.stack);
   }
   return ExitCode.Error;
@@ -250,7 +290,7 @@ export function manifest(chain?: readonly CommandSpec[]) {
     name: "opensume",
     version: VERSION,
     description: root.summary,
-    api: { default_base_url: DEFAULT_BASE_URL, docs: "https://api.dev.sume.com/docs" },
+    api: { default_base_url: DEFAULT_BASE_URL, docs: DOCS_URL },
     env: {
       SUME_API_KEY: "API key (open.sume.com → API keys)",
       SUME_API_BASE_URL: `API host, default ${DEFAULT_BASE_URL}`,

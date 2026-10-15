@@ -46,6 +46,8 @@ export interface ClientOptions {
 
 export interface RequestOptions {
   query?: Record<string, string | number | undefined>;
+  /** Per-attempt timeout for this request, overriding the client's. */
+  timeoutMs?: number;
   body?: unknown;
   /** `none` never sends the key, `optional` sends it when there is one. */
   auth?: "required" | "optional" | "none";
@@ -102,7 +104,7 @@ export class SumeClient {
 
   constructor(options: ClientOptions) {
     this.baseUrl = normalizeBaseUrl(options.baseUrl);
-    this.#apiKey = options.apiKey?.trim() || undefined;
+    this.#apiKey = checkKey(options.apiKey);
     this.hasKey = this.#apiKey !== undefined;
     this.#userAgent = options.userAgent;
     this.#maxRetries = options.maxRetries ?? 3;
@@ -156,7 +158,11 @@ export class SumeClient {
   // Jobs.
 
   async getStatus(id: string, signal?: AbortSignal): Promise<ApiResponse<StatusResponse>> {
-    return this.request<StatusResponse>("GET", `/v1/jobs/${encodeURIComponent(id)}/status`, { signal });
+    // Short: a status read that hangs should be retried, not waited out.
+    return this.request<StatusResponse>("GET", `/v1/jobs/${encodeURIComponent(id)}/status`, {
+      signal,
+      timeoutMs: 20_000,
+    });
   }
 
   async getJob(id: string, signal?: AbortSignal): Promise<Job> {
@@ -254,7 +260,7 @@ export class SumeClient {
           method,
           headers,
           body: body ?? null,
-          signal: withTimeout(options.signal, this.#timeoutMs),
+          signal: withTimeout(options.signal, options.timeoutMs ?? this.#timeoutMs),
         });
       } catch (error) {
         if (options.signal?.aborted) throw options.signal.reason;
@@ -299,7 +305,13 @@ export class SumeClient {
   }
 }
 
-/** `https://api.dev.sume.com/v1/` → `https://api.dev.sume.com`. */
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * `https://api.dev.sume.com/v1/` → `https://api.dev.sume.com`. Plain http is
+ * allowed for local test servers only: anywhere else it would send the key
+ * across the network in the clear.
+ */
 export function normalizeBaseUrl(raw: string): string {
   let url: URL;
   try {
@@ -307,14 +319,34 @@ export function normalizeBaseUrl(raw: string): string {
   } catch {
     throw new CliError(`Not a URL: ${raw}`, { exitCode: ExitCode.Usage, code: "invalid_base_url" });
   }
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new CliError(`The API base URL must be http(s): ${raw}`, {
+  const local = url.protocol === "http:" && LOCAL_HOSTS.has(url.hostname);
+  if (url.protocol !== "https:" && !local) {
+    throw new CliError(`The API base URL must use https: ${raw}`, {
       exitCode: ExitCode.Usage,
       code: "invalid_base_url",
+      hint: "Plain http is accepted only for localhost.",
     });
   }
   const path = url.pathname.replace(/\/+$/u, "").replace(/\/v1$/u, "");
   return `${url.origin}${path}`;
+}
+
+/**
+ * A key goes into an HTTP header, so anything but printable ASCII (a line
+ * break from a sloppy paste, a space) is refused here, by name of the
+ * problem only. Left to `fetch`, the header error would quote the key.
+ */
+function checkKey(raw: string | undefined): string | undefined {
+  const key = raw?.trim();
+  if (!key) return undefined;
+  if (!/^[\x21-\x7e]+$/u.test(key)) {
+    throw new CliError("The API key contains spaces, line breaks or other characters a key never has.", {
+      exitCode: ExitCode.Auth,
+      code: "invalid_api_key",
+      hint: "Copy the key again from https://open.sume.com/api-keys.",
+    });
+  }
+  return key;
 }
 
 function withTimeout(signal: AbortSignal | undefined, ms: number): AbortSignal {
@@ -362,11 +394,16 @@ function networkError(url: string, error: unknown): CliError {
     error instanceof Error && error.name === "TimeoutError"
       ? "timed out"
       : error instanceof Error
-        ? ((error.cause as { code?: string } | undefined)?.code ?? error.message)
-        : String(error);
+        ? ((error.cause as { code?: string } | undefined)?.code ?? redact(error.message))
+        : redact(String(error));
   return new CliError(`Could not reach ${host} (${reason}).`, {
     code: "network_error",
     hint: "Check your connection, or the base URL with `opensume auth status`.",
     cause: error,
   });
+}
+
+/** Errors from the HTTP stack can quote header values; never let a key through. */
+export function redact(text: string): string {
+  return text.replace(/Bearer\s+\S+/giu, "Bearer [redacted]").replace(/sume_[A-Za-z0-9_-]{8,}/gu, "[redacted key]");
 }
