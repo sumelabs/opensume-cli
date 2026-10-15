@@ -94,12 +94,12 @@ opensume auth login        # paste the key; it is checked, then stored for your 
 
 Or export it for the current shell instead: `export SUME_API_KEY="sume_live_..."`.
 
-**2. Make an image.** This one costs $0.0077:
+**2. Make an image.** This one costs under a cent:
 
 ```console
 $ opensume run gpt-image-2 "a ceramic cup on a wooden table, morning light" -q low -o cup.png
 Job job_7558248a-3a25-4b2a-9f6a-832bdc23b846
-✓ gpt-image-2 completed in 15s · $0.0077
+✓ gpt-image-2 completed in 15s · $0.0060
   cup.png  934 KB · image/png
 ```
 
@@ -318,7 +318,7 @@ open.sume.com keys pay in US dollars from your open.sume.com balance; top up und
 $ opensume run gpt-image-2 "a red kite over a beach, flat illustration" -q low -o kite.png --max-usd 0.02 --json
 {
   "job": { "id": "job_d45000cc-9bc7-4631-8feb-18e596a6da3d", "model": "gpt-image-2", "status": "completed" },
-  "usd": "0.0077",
+  "usd": "0.0060",
   "elapsed_ms": 15093,
   "artifacts": [
     {
