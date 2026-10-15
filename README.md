@@ -56,7 +56,7 @@ curl -fsSL https://raw.githubusercontent.com/sumelabs/opensume-cli/main/install.
 irm https://raw.githubusercontent.com/sumelabs/opensume-cli/main/install.ps1 | iex
 ```
 
-Both scripts download the binary for your platform from the [latest release](https://github.com/sumelabs/opensume-cli/releases/latest), check it against the release's SHA-256 checksums, and put it on your `PATH` (`~/.opensume/bin`, or `%LOCALAPPDATA%\opensume\bin` on Windows). Builds exist for macOS (Apple silicon and Intel), Linux (x64 and arm64, glibc and musl/Alpine) and Windows x64. Set `OPENSUME_VERSION=0.1.0` to pin a version, `OPENSUME_INSTALL_DIR` to choose the folder, or `OPENSUME_NO_MODIFY_PATH=1` to leave your `PATH` alone.
+Both scripts download the binary for your platform from the [latest release](https://github.com/sumelabs/opensume-cli/releases/latest), check it against the release's SHA-256 checksums, and put it on your `PATH` (`~/.opensume/bin`, or `%LOCALAPPDATA%\opensume\bin` on Windows). Builds exist for macOS (Apple silicon and Intel), Linux (x64 and arm64, glibc and musl) and Windows x64. On Alpine, install the C++ runtime first: `apk add libstdc++ libgcc`. Set `OPENSUME_VERSION=0.1.0` to pin a version, `OPENSUME_INSTALL_DIR` to choose the folder, or `OPENSUME_NO_MODIFY_PATH=1` to leave your `PATH` alone.
 
 **With Node.js 22 or newer**
 

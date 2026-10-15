@@ -75,7 +75,9 @@ jobs:
           bin=dist/bin/opensume-${{ matrix.target }}
           [ -f "$bin.exe" ] && bin="$bin.exe"
           case "$bin" in
-            *-musl) run() { docker run --rm -v "$PWD/dist/bin:/b" alpine:3.22 "/b/${bin##*/}" "$@"; } ;;
+            *-musl)
+              # Bun's musl runtime links libstdc++ and libgcc, which Alpine does not ship by default.
+              run() { docker run --rm -v "$PWD/dist/bin:/b" alpine:3.22 sh -c 'apk add --no-cache libstdc++ libgcc >/dev/null && exec "$0" "$@"' "/b/${bin##*/}" "$@"; } ;;
             *) run() { "$bin" "$@"; } ;;
           esac
           test "$(run --version)" = "opensume $VERSION"
@@ -196,7 +198,7 @@ jobs:
           VERSION: ${{ needs.check.outputs.version }}
         run: |
           docker run --rm -v "$PWD:/w" -e OPENSUME_VERSION="$VERSION" -e OPENSUME_NO_MODIFY_PATH=1 alpine:3.22 \
-            sh -c 'apk add --no-cache curl >/dev/null && sh /w/install.sh && test "$("$HOME/.opensume/bin/opensume" --version)" = "opensume $OPENSUME_VERSION"'
+            sh -c 'apk add --no-cache curl libstdc++ libgcc >/dev/null && sh /w/install.sh && test "$("$HOME/.opensume/bin/opensume" --version)" = "opensume $OPENSUME_VERSION"'
       - name: npm install from the release
         if: runner.os == 'Linux'
         env:

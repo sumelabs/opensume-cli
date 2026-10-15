@@ -97,6 +97,11 @@ chmod 755 "$tmp/$asset"
 mv "$tmp/$asset" "$INSTALL_DIR/opensume"
 say "${GREEN}✓${RESET} Installed ${BOLD}opensume $version${RESET} to $INSTALL_DIR/opensume"
 
+# The musl build links the C++ runtime, which Alpine does not install by default.
+if [ -n "$libc" ] && ! { [ -e /usr/lib/libstdc++.so.6 ] || [ -e /lib/libstdc++.so.6 ]; }; then
+  say "${RED}!${RESET} opensume needs the C++ runtime here. Install it with:  apk add libstdc++ libgcc"
+fi
+
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) on_path=1 ;;
   *) on_path=0 ;;

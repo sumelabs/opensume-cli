@@ -67,7 +67,8 @@ jobs:
           ./dist/bin/opensume-linux-x64 --version
           ./dist/bin/opensume-linux-x64 version
           ./dist/bin/opensume-linux-x64 completion bash | bash -n
-          docker run --rm -v "$PWD/dist/bin:/b" alpine:3.22 /b/opensume-linux-x64-musl --version
+          docker run --rm -v "$PWD/dist/bin:/b" alpine:3.22 \
+            sh -c 'apk add --no-cache libstdc++ libgcc >/dev/null && /b/opensume-linux-x64-musl --version'
           (cd dist/bin && sha256sum -c checksums.txt)
       - name: Check the install scripts
         run: |
