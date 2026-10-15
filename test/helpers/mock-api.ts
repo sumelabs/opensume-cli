@@ -310,7 +310,8 @@ export class MockApi {
             type: job.status === "failed" ? "job.failed" : "job.completed",
             status: job.status === "failed" ? "failed" : "succeeded",
             created_at: new Date(Date.parse(job.created_at) + 4200).toISOString(),
-            ...(job.error ? { data: { error: job.error } } : {}),
+            // Like the real API, the failed event carries no reason; the job does.
+            data: { terminal_event_status: job.status },
           },
         ];
         return send(200, { data: { request_id: job.id, job_id: job.id, events } });

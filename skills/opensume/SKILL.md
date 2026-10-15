@@ -59,7 +59,7 @@ If a wait times out (exit 6) or is interrupted (exit 130), the job keeps running
 | 2 | Bad command line | Fix the flags; see `opensume <command> --help` |
 | 3 | Key missing, wrong or not allowed | Ask the user for a valid open.sume.com key |
 | 4 | The API refused the request | Read `error.message` and `error.details`, fix the input |
-| 5 | The job failed or was canceled | `opensume jobs events <id> --json` says why; failed jobs are refunded |
+| 5 | The job failed or was canceled | `opensume jobs get <id> --json` has the `error`; failed jobs are refunded |
 | 6 | Timed out waiting | `opensume jobs wait <id>` |
 | 7 | Balance too low, or over `--max-usd` | Tell the user |
 | 8 | Rate limit or concurrency cap | Wait for running jobs, then retry |

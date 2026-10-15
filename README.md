@@ -315,7 +315,7 @@ Without `--json`, results go to stdout and everything else (progress, notes, err
 | `2` | Bad command line: unknown flag, missing argument |
 | `3` | No key, wrong or revoked key, or a route the key may not call |
 | `4` | The API refused the request: invalid input, unknown model or job |
-| `5` | The job failed or was canceled (`opensume jobs events <id>` says why) |
+| `5` | The job failed or was canceled (`opensume jobs get <id>` says why; it is refunded) |
 | `6` | `--timeout` passed while the job was still running |
 | `7` | Balance too low, or the price is over `--max-usd` |
 | `8` | Rate limit or concurrency cap; retry later |

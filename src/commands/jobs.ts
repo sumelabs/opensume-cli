@@ -204,6 +204,15 @@ const events: CommandSpec = {
     }
     const first = res.events[0] ? Date.parse(res.events[0].created_at) : 0;
     for (const event of res.events) for (const line of eventLines(ctx, event, first)) ui.out(line);
+    // The API's job.failed event does not always carry the reason; the job does.
+    const last = res.events[res.events.length - 1];
+    if (last && /^job\.(failed|canceled)$/u.test(last.type) && !(last.data as { error?: unknown } | undefined)?.error) {
+      const job = await ctx
+        .client()
+        .getJob(id, ctx.signal)
+        .catch(() => undefined);
+      if (job?.error?.message) ui.out(`${" ".repeat(10)}${ui.c.red(job.error.message)}`);
+    }
     return ExitCode.Ok;
   },
 };

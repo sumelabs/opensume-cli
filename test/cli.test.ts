@@ -150,12 +150,20 @@ describe("run", () => {
     expect(first.json<{ job: { id: string } }>().job.id).toBe(second.json<{ job: { id: string } }>().job.id);
   });
 
+  it("shows why a job failed under its events, from the job", async () => {
+    api.nextOutcome = "failed";
+    const id = (await cli(["run", "gpt-image-2", "a cup", "--json"])).json<{ job: { id: string } }>().job.id;
+    const res = await cli(["jobs", "events", id]);
+    expect(res.stdout).toContain("job.failed");
+    expect(res.stdout).toContain("The model refused the prompt.");
+  });
+
   it("exits 5 with the reason when the job fails", async () => {
     api.nextOutcome = "failed";
     const res = await cli(["run", "gpt-image-2", "a cup"]);
     expect(res.code).toBe(5);
     expect(res.stderr).toContain("gpt-image-2 failed: The model refused the prompt.");
-    expect(res.stderr).toContain("opensume jobs events job_");
+    expect(res.stderr).toContain("opensume jobs get job_");
   });
 
   it("exits 6 when --timeout passes, naming the job to resume once", async () => {

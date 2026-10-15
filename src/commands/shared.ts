@@ -473,8 +473,8 @@ export function reportJobFailure(
 }
 
 function failureHint(jobId: string, retryable: boolean | undefined): string {
-  const events = `Details: opensume jobs events ${jobId}`;
-  return retryable ? `This may pass on a retry. ${events}` : events;
+  const details = `Failed jobs are refunded. Details: opensume jobs get ${jobId}`;
+  return retryable ? `This may pass on a retry. ${details}` : details;
 }
 
 /** Open a file with the platform's default app, detached. */
