@@ -168,8 +168,13 @@ describe("run", () => {
   it("names the job to resume when interrupted", async () => {
     api.readsUntilDone = 1000;
     const controller = new AbortController();
-    setTimeout(() => controller.abort(), 50);
+    // Interrupt once the job exists (a fixed delay is flaky on slow runners).
+    const before = api.jobs.size;
+    const watch = setInterval(() => {
+      if (api.jobs.size > before && api.calls("GET", "/v1/jobs/").length > 0) controller.abort();
+    }, 2);
     const res = await cli(["run", "gpt-image-2", "a cup"], { signal: controller.signal });
+    clearInterval(watch);
     expect(res.code).toBe(130);
     expect(res.stderr).toMatch(
       /Stopped waiting\. Job (job_\S+) keeps running on Sume\.\n {2}Pick it up with: opensume jobs wait \1/u,
