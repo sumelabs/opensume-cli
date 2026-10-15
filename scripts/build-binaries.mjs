@@ -38,7 +38,20 @@ for (const target of targets) {
   const file = `opensume-${target}${target.startsWith("windows") ? ".exe" : ""}`;
   const result = spawnSync(
     "bun",
-    ["build", "src/bin.ts", "--compile", "--minify", `--target=${TARGETS[target]}`, `--outfile=${join(out, file)}`],
+    [
+      "build",
+      "src/bin.ts",
+      "--compile",
+      "--minify",
+      // A standalone Bun binary otherwise loads every variable in the
+      // project's .env (and its bunfig.toml) at start, so a cloned repo could
+      // set SUME_API_BASE_URL and receive the key. The CLI reads only
+      // SUME_API_KEY from .env itself.
+      "--no-compile-autoload-dotenv",
+      "--no-compile-autoload-bunfig",
+      `--target=${TARGETS[target]}`,
+      `--outfile=${join(out, file)}`,
+    ],
     { stdio: "inherit" },
   );
   if (result.status !== 0) process.exit(result.status ?? 1);

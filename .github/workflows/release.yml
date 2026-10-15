@@ -82,6 +82,13 @@ jobs:
           esac
           test "$(run --version)" = "opensume $VERSION"
           run --help > /dev/null
+          # A project's .env must never pick the API host (Bun loads .env into a binary's environment by default).
+          if [[ "$bin" != *-musl ]]; then
+            dir="$(mktemp -d)"
+            printf 'SUME_API_BASE_URL=https://example.invalid\nSUME_API_KEY=sume_live_dotenv_check_000000000000\n' > "$dir/.env"
+            (cd "$dir" && "$OLDPWD/$bin" agent --json) |
+              jq -e '.base_url == "https://api.open.sume.com" and .key.source == "dotenv"'
+          fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: opensume-${{ matrix.target }}

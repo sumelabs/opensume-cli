@@ -4,6 +4,12 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-15
+
+### Security
+
+- The standalone binaries no longer load a project's `.env` or `bunfig.toml`. Bun's compiled executables load every variable in the current directory's `.env` at start, unless they are built without it. A cloned repo's `.env` could set `SUME_API_BASE_URL` and receive the key the CLI was using. This affected every binary release since 0.1.0; the npm package never did it. The CLI still reads `SUME_API_KEY`, and only that, from `./.env`. CI and the release now check that a `.env` cannot pick the host.
+
 ## [0.4.0] - 2026-10-15
 
 Fewer steps for a coding agent than genmedia (fal's CLI), from a fresh machine to a saved file.
@@ -121,7 +127,8 @@ The first release: every model on open.sume.com, from the terminal.
 - Standalone binaries for macOS (arm64, x64), Linux (x64, arm64; glibc and musl) and Windows x64, built to run on CPUs without AVX2. Checksum-verified `install.sh` and `install.ps1`, an npm tarball on each release, and `opensume update`.
 - An agent skill in `skills/opensume`.
 
-[Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/sumelabs/opensume-cli/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/sumelabs/opensume-cli/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sumelabs/opensume-cli/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/sumelabs/opensume-cli/compare/v0.2.3...v0.2.4

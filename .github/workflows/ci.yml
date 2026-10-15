@@ -67,6 +67,11 @@ jobs:
           ./dist/bin/opensume-linux-x64 --version
           ./dist/bin/opensume-linux-x64 version
           ./dist/bin/opensume-linux-x64 completion bash | bash -n
+          # A project's .env must never pick the API host (Bun loads .env into a binary's environment by default).
+          dir="$(mktemp -d)"
+          printf 'SUME_API_BASE_URL=https://example.invalid\nSUME_API_KEY=sume_live_dotenv_check_000000000000\n' > "$dir/.env"
+          (cd "$dir" && "$OLDPWD/dist/bin/opensume-linux-x64" agent --json) |
+            jq -e '.base_url == "https://api.open.sume.com" and .key.source == "dotenv"'
           docker run --rm -v "$PWD/dist/bin:/b" alpine:3.22 \
             sh -c 'apk add --no-cache libstdc++ libgcc >/dev/null && /b/opensume-linux-x64-musl --version'
           (cd dist/bin && sha256sum -c checksums.txt)
