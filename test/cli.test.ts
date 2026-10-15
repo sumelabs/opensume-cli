@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { agentMarkdown } from "../src/commands/agent.ts";
+import { agentMarkdown, skillMarkdown } from "../src/commands/agent.ts";
 import { MockApi, PNG, TEST_KEY } from "./helpers/mock-api.ts";
 import { runCli, tempDir } from "./helpers/run-cli.ts";
 
@@ -598,36 +598,39 @@ describe("fal-level features", () => {
 });
 
 describe("agent", () => {
-  it("prints the install, the API host, the wrong host and the key setup", async () => {
+  it("prints the setup, the run commands and the live models with their prices", async () => {
     const res = await cli(["agent"], { key: null });
     expect(res.code).toBe(0);
     for (const text of [
       "curl -fsSL https://raw.githubusercontent.com/sumelabs/opensume-cli/main/install.sh | sh",
-      "Base URL: `https://api.open.sume.com`",
-      "Not `https://api.sume.com`",
-      "SUME_API_KEY",
-      "Authorization: Bearer",
-      "--max-usd",
+      "npx -y https://github.com/sumelabs/opensume-cli/releases/latest/download/opensume.tgz",
+      "Host: `https://api.open.sume.com`, the default; nothing to set",
+      "Never `https://api.sume.com`",
+      "read from the environment or from `./.env`",
+      "OPENSUME_MAX_USD",
       "Key: none",
+      "**Models now**",
     ]) {
       expect(res.stdout).toContain(text);
     }
+    expect(res.stdout).toMatch(/gpt-image-2\s+image\s+\$0\.0077/u);
     const json = (await cli(["agent", "--json"])).json<{
-      install: { sh: string };
       default_base_url: string;
       wrong_base_url: string;
       key: { set: boolean; source: string };
+      models: { id: string; per: string }[];
     }>();
     expect(json).toMatchObject({
       default_base_url: "https://api.open.sume.com",
       wrong_base_url: "https://api.sume.com",
       key: { set: true, source: "env" },
     });
+    expect(json.models.map((m) => m.id)).toContain("seedance-2-mini");
     expect(JSON.stringify(json)).not.toContain(TEST_KEY);
     expect((await cli(["quickstart"], { key: null })).stdout).toContain("## opensume");
   });
 
-  it("writes one marked block into an AGENTS.md, and replaces it on the next run", async () => {
+  it("writes one marked block into a file, and replaces it on the next run", async () => {
     const cwd = tempDir();
     const file = join(cwd, "AGENTS.md");
     writeFileSync(file, "# My project\n\nRules.\n");
@@ -639,7 +642,7 @@ describe("agent", () => {
     expect((await cli(["agent", "--write", "AGENTS.md", "--json"], { cwd })).json()).toMatchObject({
       action: "unchanged",
     });
-    writeFileSync(file, once.replace("Images, video", "Old text"));
+    writeFileSync(file, once.replace("runs any open.sume.com model", "old text"));
     expect((await cli(["agent", "--write", "AGENTS.md", "--json"], { cwd })).json()).toMatchObject({
       action: "updated",
     });
@@ -648,21 +651,90 @@ describe("agent", () => {
     expect((await cli(["agent", "--write", "broken.md"], { cwd })).code).toBe(2);
   });
 
+  it("init writes AGENTS.md and a Claude skill, plus a Cursor rule when the project uses Cursor", async () => {
+    const cwd = tempDir();
+    const first = (await cli(["init", "--json"], { cwd, key: null })).json<{
+      files: { target: string; action: string }[];
+    }>();
+    expect(first.files).toEqual([
+      expect.objectContaining({ target: "agents", action: "created" }),
+      expect.objectContaining({ target: "claude", action: "created" }),
+    ]);
+    expect(readFileSync(join(cwd, ".claude/skills/opensume/SKILL.md"), "utf8")).toBe(skillMarkdown());
+    expect(readFileSync(join(cwd, "AGENTS.md"), "utf8")).toContain(agentMarkdown());
+    mkdirSync(join(cwd, ".cursor"));
+    const again = (await cli(["init", "--json"], { cwd, key: null })).json<{
+      files: { target: string; action: string }[];
+    }>();
+    expect(again.files.map((f) => `${f.target}:${f.action}`)).toEqual([
+      "agents:unchanged",
+      "claude:unchanged",
+      "cursor:created",
+    ]);
+    expect(readFileSync(join(cwd, ".cursor/rules/opensume.mdc"), "utf8")).toContain("alwaysApply: false");
+    expect((await cli(["init", "--targets", "agents,codex"], { cwd, key: null })).code).toBe(2);
+  });
+
   it("tells a person with no key where to start, and lists install lines in --help --json", async () => {
     expect((await cli(["--help"], { key: null })).stdout).toContain(
-      "No key yet: make one at https://open.sume.com/api-keys",
+      "No key yet: a person makes one at https://open.sume.com/api-keys",
     );
     expect((await cli(["--help"])).stdout).not.toContain("No key yet");
     const manifest = (await cli(["--help", "--json"], { key: null })).json<{ install: { sh: string }; env: object }>();
     expect(manifest.install.sh).toContain("install.sh");
     expect(manifest.env).toHaveProperty("OPENSUME_OUTPUT");
+    expect(manifest.env).toHaveProperty("OPENSUME_MAX_USD");
   });
 });
 
-describe("AGENTS.md", () => {
-  it("carries the page `opensume agent` prints, between its markers", () => {
+describe("less setup for agents", () => {
+  it("reads SUME_API_KEY from ./.env, after the environment", async () => {
+    const cwd = tempDir();
+    writeFileSync(
+      join(cwd, ".env"),
+      `OTHER=1\nexport SUME_API_KEY="${TEST_KEY}"  \nSUME_API_BASE_URL=https://evil.example\n`,
+    );
+    const status = await cli(["auth", "status", "--json"], { cwd, key: null });
+    expect(status.code).toBe(0);
+    expect(status.json()).toMatchObject({ valid: true, key_source: "dotenv" });
+    // The host never comes from .env: the test's mock host is still the one used.
+    expect(status.json<{ api_url: string }>().api_url).toBe(api.url);
+    const env = await cli(["auth", "status", "--json"], { cwd, key: "sume_live_wrong_wrong_wrong_wrong" });
+    expect(env.json()).toMatchObject({ valid: false, key_source: "env" });
+    expect((await cli(["jobs", "list"], { key: null, cwd: tempDir() })).stderr).toContain("put it in ./.env");
+  });
+
+  it("caps every run with OPENSUME_MAX_USD, and --max-usd beats it", async () => {
+    const over = await cli(["run", "gpt-image-2", "a cup"], { env: { OPENSUME_MAX_USD: "0.001" } });
+    expect(over.code).toBe(7);
+    expect(over.stderr).toContain("over OPENSUME_MAX_USD $0.001");
+    expect(api.calls("POST", "/v1/image-router")).toHaveLength(0);
+    const flag = await cli(["run", "gpt-image-2", "a cup", "--max-usd", "1", "--no-download"], {
+      env: { OPENSUME_MAX_USD: "0.001" },
+    });
+    expect(flag.code).toBe(0);
+    expect((await cli(["run", "gpt-image-2", "a cup"], { env: { OPENSUME_MAX_USD: "cheap" } })).code).toBe(2);
+  });
+
+  it("lists models briefly: price per unit, inputs, limits, cheapest first", async () => {
+    const res = await cli(["models", "--brief", "--json"], { key: null });
+    const rows = res.json<{ id: string; kind: string; usd_from: string; per: string; inputs: string[] }[]>();
+    expect(rows[0]).toMatchObject({ id: "gpt-image-2", kind: "image", per: "image" });
+    expect(rows.find((r) => r.id === "seedance-2-mini")).toMatchObject({ per: "second", seconds: { min: 4 } });
+    expect(JSON.stringify(rows).length).toBeLessThan(
+      JSON.stringify((await cli(["models", "--json"], { key: null })).json()).length / 2,
+    );
+  });
+});
+
+describe("generated agent files", () => {
+  it("AGENTS.md carries the page `opensume agent` prints, between its markers", () => {
     const text = readFileSync(join(import.meta.dirname, "..", "AGENTS.md"), "utf8");
     const block = text.slice(text.indexOf("<!-- BEGIN opensume -->\n") + 24, text.indexOf("\n<!-- END opensume -->"));
     expect(block).toBe(agentMarkdown());
+  });
+
+  it("skills/opensume/SKILL.md is the same page as a skill", () => {
+    expect(readFileSync(join(import.meta.dirname, "..", "skills/opensume/SKILL.md"), "utf8")).toBe(skillMarkdown());
   });
 });

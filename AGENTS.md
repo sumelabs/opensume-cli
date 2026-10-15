@@ -3,46 +3,39 @@
 Two kinds of agent read this. To **use** `opensume` (make images and video for someone), follow the first section; it is the page `opensume agent` prints. To **change** this repository, read the second.
 
 <!-- BEGIN opensume -->
-## opensume: the Sume Open API from the shell
+## opensume: images and video from the Sume Open API
 
-Images, video, lip-sync and captions from every open.sume.com model, priced in dollars. Every command takes `--json`.
+`opensume` runs any open.sume.com model from the shell: it prices the request in dollars, waits for the job, and saves the file.
 
-**Install**
+**Setup, once**
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/sumelabs/opensume-cli/main/install.sh | sh
 ```
 
-Windows: `irm https://raw.githubusercontent.com/sumelabs/opensume-cli/main/install.ps1 | iex`. Node 22+: `npm install -g https://github.com/sumelabs/opensume-cli/releases/latest/download/opensume.tgz`.
+Windows: `irm https://raw.githubusercontent.com/sumelabs/opensume-cli/main/install.ps1 | iex`. No install, with Node 22+: put `npx -y https://github.com/sumelabs/opensume-cli/releases/latest/download/opensume.tgz` where these examples say `opensume`.
 
-**API**
+- Key: `SUME_API_KEY`, read from the environment or from `./.env`. A person makes it at https://open.sume.com/api-keys. Never print it, and never paste it into a chat or a command line.
+- Host: `https://api.open.sume.com`, the default; nothing to set. Never `https://api.sume.com`: that is sume.com's API, and Open keys fail there.
+- Check both: `opensume doctor`.
 
-- Base URL: `https://api.open.sume.com`, the default. `SUME_API_BASE_URL` or `--base-url` changes it.
-- Not `https://api.sume.com`: that is sume.com's API, not Open's, and Open keys do not work there.
-- `https://open-api-development.up.railway.app` is Open's development API, for Sume staff, with its own keys (open.dev.sume.com).
-- Docs: https://open.sume.com/docs
-
-**Key**
-
-- The CLI reads it from `SUME_API_KEY` (made at https://open.sume.com/api-keys). Never paste a key into a chat, a file in the repo, or a command line.
-- Or save it once: `printenv SUME_API_KEY | opensume auth login --with-key`.
-- Check it: `opensume auth status --json` answers `valid: true`.
-- Raw HTTP sends it as `Authorization: Bearer $SUME_API_KEY`.
-
-**Use**
+**Make something**
 
 ```sh
-opensume models --json                                         # models, kinds and prices
-opensume schema <model> --json                                 # every input; each one is also a flag
-opensume estimate <model> "<prompt>" --json                    # the price in dollars, free
-opensume run <model> "<prompt>" --max-usd 0.10 -o out/ --json  # submit, wait, save the file
-opensume jobs wait <job_id> -o out/ --json                     # pick up a long or interrupted job
+opensume models --brief                                            # pick a model: price per image or second, inputs, limits
+opensume run gpt-image-2 "a red kite over a beach" -q low -o out/  # waits, saves, prints the file path
+opensume run seedance-2-mini "a paper boat" -d 4 -r 480p --max-usd 0.50 -o out/ --json
 ```
 
-- Always pass `--max-usd`; over it, nothing is submitted (exit 7). A second submit is a second charge: resume with `jobs wait`.
-- Exit codes: 0 ok, 2 bad flags, 3 key, 4 input refused, 5 job failed (refunded), 6 timed out, 7 funds or `--max-usd`, 8 rate limit, 130 interrupted.
-- Errors in `--json` are `{error: {code, message, hint}}`. `OPENSUME_OUTPUT=json` makes every command print JSON without the flag.
-- Every command and flag: `opensume --help --json`. Agent skill: https://raw.githubusercontent.com/sumelabs/opensume-cli/main/skills/opensume/SKILL.md
+- Name the model yourself: prices differ by more than 100× between models. Before a large spend, show the user `opensume estimate` with the same flags (free).
+- `run` prints the saved file's path. With `--json` it prints `{"job", "usd", "artifacts": [{"path", "url", "content_type"}]}`; `OPENSUME_OUTPUT=json` does that without the flag.
+- Cap the spend with `--max-usd`, or `OPENSUME_MAX_USD` for every run. Over the cap nothing is submitted (exit 7).
+- Local files work wherever a URL does (`--image ./photo.png`, `--video`, `--audio`). Every field in `opensume schema <model>` is also a flag, like `--captions.style glass`.
+- Long video: `--no-wait` returns the job id at once, and `opensume jobs wait <job> -o out/` saves it later. After a timeout (exit 6) or Ctrl-C (130) the job keeps running: resume it with `jobs wait`. Never resubmit; a second submit is a second charge.
+
+**When it fails**
+
+Exit codes: 1 network or server (retry), 2 bad flags, 3 key (follow `error.hint`), 4 input refused (fix what `error.message` says), 5 job failed (refunded; `opensume jobs get <job>` says why), 6 timed out, 7 balance or cap, 8 rate limit. With `--json`, errors are `{"error": {"code", "message", "hint", "request_id"}}`. Every command and flag: `opensume --help --json`. Docs: https://open.sume.com/docs
 <!-- END opensume -->
 
 ## Working on this repository

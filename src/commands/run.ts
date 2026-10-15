@@ -47,7 +47,7 @@ export const run: CommandSpec = {
       type: "number",
       placeholder: "<dollars>",
       section: "Submit",
-      description: "Refuse to submit if the price is above this",
+      description: "Refuse to submit if the price is above this (default: OPENSUME_MAX_USD)",
     },
     {
       name: "dry-run",
@@ -99,7 +99,8 @@ async function runCommand(parsed: Parsed, ctx: Context): Promise<number> {
   const model = await resolveModel(ctx, modelId);
   const body = await buildBody(model, { ...flags, prompt });
   const localFiles = localMediaPaths(body);
-  const maxUsd = flags["max-usd"] as number | undefined;
+  const cap = spendCap(flags["max-usd"] as number | undefined, ctx.env);
+  const maxUsd = cap?.usd;
   const warnings: string[] = [];
   const warn = (note: string) => {
     warnings.push(note);
@@ -153,8 +154,14 @@ async function runCommand(parsed: Parsed, ctx: Context): Promise<number> {
     for (const note of pricingNotes(body, estimate)) warn(note);
     if (Number(estimate.usd) > maxUsd) {
       throw new CliError(
-        `This costs ${formatUsd(estimate.usd)}, over --max-usd ${formatUsd(maxUsd)}. Nothing was submitted.`,
-        { exitCode: ExitCode.Funds, code: "over_budget" },
+        `This costs ${formatUsd(estimate.usd)}, over ${cap?.from} ${formatUsd(maxUsd)}. Nothing was submitted.`,
+        {
+          exitCode: ExitCode.Funds,
+          code: "over_budget",
+          ...(cap?.from === "OPENSUME_MAX_USD"
+            ? { hint: "Raise OPENSUME_MAX_USD, or pass --max-usd for this run." }
+            : {}),
+        },
       );
     }
   }
@@ -227,6 +234,21 @@ async function runCommand(parsed: Parsed, ctx: Context): Promise<number> {
       ...(warnings.length ? { warnings } : {}),
     },
   });
+}
+
+/**
+ * The most a run may cost: `--max-usd`, else `OPENSUME_MAX_USD` from the
+ * environment, so an agent's whole session can be capped once.
+ */
+export function spendCap(flag: number | undefined, env: NodeJS.ProcessEnv): { usd: number; from: string } | undefined {
+  if (flag !== undefined) return { usd: flag, from: "--max-usd" };
+  const raw = env.OPENSUME_MAX_USD?.trim();
+  if (!raw) return undefined;
+  const usd = Number(raw);
+  if (!Number.isFinite(usd) || usd < 0) {
+    throw new UsageError(`OPENSUME_MAX_USD must be a dollar amount like 0.50 (got "${env.OPENSUME_MAX_USD}").`);
+  }
+  return { usd, from: "OPENSUME_MAX_USD" };
 }
 
 /** Why `--max-usd` could not be checked, with the API's own reason when it gave one. */

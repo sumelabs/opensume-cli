@@ -27,6 +27,8 @@ export const INSTALL = {
   sh: "curl -fsSL https://raw.githubusercontent.com/sumelabs/opensume-cli/main/install.sh | sh",
   powershell: "irm https://raw.githubusercontent.com/sumelabs/opensume-cli/main/install.ps1 | iex",
   npm: "npm install -g https://github.com/sumelabs/opensume-cli/releases/latest/download/opensume.tgz",
+  /** No install: run any command through npx (Node 22+). */
+  npx: "npx -y https://github.com/sumelabs/opensume-cli/releases/latest/download/opensume.tgz",
 } as const;
 
 /** The Open API docs (models, jobs, errors, webhooks). */
@@ -38,10 +40,20 @@ export interface StoredConfig {
 }
 
 export type Source = "flag" | "env" | "config" | "default";
+/** Where the key came from. `dotenv` is `SUME_API_KEY` in `./.env`. */
+export type KeySource = "flag" | "env" | "dotenv" | "config";
+
+/** How to name a key's source to a person: `--api-key`, `SUME_API_KEY`, `.env`, `saved key`. */
+export function keySourceLabel(source: KeySource | undefined): string {
+  if (source === "flag") return "--api-key";
+  if (source === "env") return "SUME_API_KEY";
+  if (source === "dotenv") return "SUME_API_KEY in ./.env";
+  return "saved key";
+}
 
 export interface Settings {
   apiKey: string | undefined;
-  apiKeySource: Exclude<Source, "default"> | undefined;
+  apiKeySource: KeySource | undefined;
   baseUrl: string;
   baseUrlSource: Source;
   configPath: string;
@@ -97,10 +109,35 @@ export function removeConfig(path: string): void {
   rmSync(path, { force: true });
 }
 
-/** Flags beat environment variables, which beat the config file. */
+/**
+ * `SUME_API_KEY` from a `.env` file in `cwd`, where projects keep their keys.
+ * Only that one variable is read: the API host never comes from a project
+ * file, so a cloned repo cannot send your saved key elsewhere.
+ */
+export function dotEnvKey(cwd: string): string | undefined {
+  let text: string;
+  try {
+    text = readFileSync(join(cwd, ".env"), "utf8");
+  } catch {
+    return undefined;
+  }
+  for (const line of text.split(/\r?\n/u)) {
+    const match = /^\s*(?:export\s+)?SUME_API_KEY\s*=\s*(.*?)\s*$/u.exec(line);
+    if (!match) continue;
+    let value = match[1] as string;
+    const quote = value[0];
+    if ((quote === '"' || quote === "'") && value.endsWith(quote) && value.length >= 2) value = value.slice(1, -1);
+    else value = value.replace(/\s+#.*$/u, "");
+    return value.trim() || undefined;
+  }
+  return undefined;
+}
+
+/** Flags beat environment variables, which beat `./.env` (the key only), which beats the config file. */
 export function resolveSettings(
   flags: { apiKey?: string | undefined; baseUrl?: string | undefined },
   env: NodeJS.ProcessEnv = process.env,
+  cwd?: string,
 ): Settings {
   const path = configPath(env);
   const stored = readConfig(path);
@@ -111,7 +148,11 @@ export function resolveSettings(
   let apiKeySource: Settings["apiKeySource"];
   if (flags.apiKey) [apiKey, apiKeySource] = [flags.apiKey.trim(), "flag"];
   else if (envKey) [apiKey, apiKeySource] = [envKey, "env"];
-  else if (stored.api_key) [apiKey, apiKeySource] = [stored.api_key, "config"];
+  else {
+    const fromFile = cwd ? dotEnvKey(cwd) : undefined;
+    if (fromFile) [apiKey, apiKeySource] = [fromFile, "dotenv"];
+    else if (stored.api_key) [apiKey, apiKeySource] = [stored.api_key, "config"];
+  }
 
   let baseUrl = DEFAULT_BASE_URL;
   let baseUrlSource: Source = "default";

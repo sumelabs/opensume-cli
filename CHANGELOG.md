@@ -4,6 +4,24 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-15
+
+Fewer steps for a coding agent than genmedia (fal's CLI), from a fresh machine to a saved file.
+
+### Added
+
+- `opensume init` writes the agent page where coding agents read instructions: a marked block in AGENTS.md, `.claude/skills/opensume/SKILL.md`, and `.cursor/rules/opensume.mdc` when the project has a `.cursor` folder. Running it again refreshes them. It touches nothing else and makes no network calls. `--targets` picks which files to write.
+- `opensume models --brief`: one line per model with its price per image or second, its inputs and its limits, cheapest first in each kind. With `--json` it is about 12 KB, against 85 KB for the full catalog.
+- `opensume agent` ends with that list, from the public catalog with no key needed, so one command gives an agent the setup and the choices. Its JSON has `models`.
+- The key is also read from `SUME_API_KEY` in `./.env` in the current directory, so there is no setup command. Precedence: flag, then the environment, then `./.env`, then the saved key. The API host is never read from `.env`.
+- `OPENSUME_MAX_USD` caps every run when `--max-usd` is not given. The refusal names which cap it hit.
+- `install.sh` links `opensume` into `~/.local/bin` when that folder is already on PATH, so the command works in the same shell. Otherwise it prints the full path to use until the shell is reloaded. The release workflow checks this on macOS and Linux.
+
+### Changed
+
+- The agent page is one source for `opensume agent`, the AGENTS.md block, the Claude skill, the Cursor rule and this repo's `skills/opensume/SKILL.md`. It is shorter and leads with the three commands. Tests keep the generated files equal to it.
+- The install scripts and the no-key error say a person makes the key, and that `./.env` works.
+
 ## [0.3.0] - 2026-10-15
 
 From reading genmedia (fal's CLI) side by side, and from Open's console moving to production.
@@ -103,7 +121,8 @@ The first release: every model on open.sume.com, from the terminal.
 - Standalone binaries for macOS (arm64, x64), Linux (x64, arm64; glibc and musl) and Windows x64, built to run on CPUs without AVX2. Checksum-verified `install.sh` and `install.ps1`, an npm tarball on each release, and `opensume update`.
 - An agent skill in `skills/opensume`.
 
-[Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/sumelabs/opensume-cli/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sumelabs/opensume-cli/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/sumelabs/opensume-cli/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/sumelabs/opensume-cli/compare/v0.2.2...v0.2.3

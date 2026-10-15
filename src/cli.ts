@@ -1,5 +1,5 @@
 import { ApiError } from "./api/errors.ts";
-import { agent } from "./commands/agent.ts";
+import { agent, init } from "./commands/agent.ts";
 import { auth } from "./commands/auth.ts";
 import { complete } from "./commands/complete.ts";
 import { completionCommand } from "./commands/completion.ts";
@@ -43,18 +43,16 @@ export const GLOBAL_FLAGS = [
 ] as const satisfies CommandSpec["flags"];
 
 /** Under the root help: the next step for someone with no key, and the agent page. */
-function startHere(env: NodeJS.ProcessEnv): string[] {
+function startHere(env: NodeJS.ProcessEnv, cwd: string): string[] {
   let hasKey = Boolean(env.SUME_API_KEY);
   try {
-    hasKey ||= Boolean(resolveSettings({}, env).apiKey);
+    hasKey ||= Boolean(resolveSettings({}, env, cwd).apiKey);
   } catch {
     // An unreadable config is doctor's business, not help's.
   }
   return [
     "",
-    ...(hasKey
-      ? []
-      : [`No key yet: make one at ${KEYS_URL}, then export SUME_API_KEY or run \`opensume auth login\`.`]),
+    ...(hasKey ? [] : [`No key yet: a person makes one at ${KEYS_URL}; then export SUME_API_KEY or put it in ./.env.`]),
     "Setting up an agent? `opensume agent` prints the install, the API host and the key setup on one page.",
   ];
 }
@@ -103,6 +101,7 @@ export const root: CommandSpec = {
     schema,
     jobs,
     agent,
+    init,
     auth,
     doctor,
     completionCommand(() => root),
@@ -177,7 +176,8 @@ export async function main(options: MainOptions): Promise<number> {
       const chain = parsed.command === help ? chainFor(parsed.args) : chainFor(parsed.path);
       if (json) ui.json(manifest(chain[chain.length - 1] === root ? undefined : chain));
       else ui.out(renderHelp(chain, ui.c, ui.width).trimEnd());
-      if (!json && chain.length === 1) for (const line of startHere(env)) ui.out(ui.c.dim(line));
+      if (!json && chain.length === 1)
+        for (const line of startHere(env, options.cwd ?? process.cwd())) ui.out(ui.c.dim(line));
       // `run <model> --help` also shows what that model takes, like `opensume schema <model>`.
       const modelId = parsed.command !== help ? parsed.args[0] : undefined;
       const router =
@@ -199,6 +199,7 @@ export async function main(options: MainOptions): Promise<number> {
     const settings = resolveSettings(
       { apiKey: flags["api-key"] as string | undefined, baseUrl: flags["base-url"] as string | undefined },
       env,
+      options.cwd ?? process.cwd(),
     );
     const controller = new AbortController();
     const onSigint = () => {
@@ -370,10 +371,11 @@ export function manifest(chain?: readonly CommandSpec[]) {
     install: INSTALL,
     api: { default_base_url: DEFAULT_BASE_URL, wrong_base_url: WRONG_BASE_URL, docs: DOCS_URL, keys: KEYS_URL },
     env: {
-      SUME_API_KEY: `API key, made at ${KEYS_URL}. Sent as Authorization: Bearer.`,
+      SUME_API_KEY: `API key, made at ${KEYS_URL}; also read from ./.env. Sent as Authorization: Bearer.`,
       SUME_API_BASE_URL: `API host, default ${DEFAULT_BASE_URL} (never ${WRONG_BASE_URL})`,
       OPENSUME_OUTPUT:
         "json: every command prints JSON, as with --json; auto: when stdout is not a terminal; text (default)",
+      OPENSUME_MAX_USD: "Default --max-usd for every run: nothing over it is submitted",
       OPENSUME_CONFIG_DIR: "Where the saved key lives",
       NO_COLOR: "Disable color",
     },

@@ -24,12 +24,20 @@ export const models: CommandSpec = {
       placeholder: "<slug>",
       description: "Only models from this company, like openai",
     },
+    {
+      name: "brief",
+      short: "b",
+      type: "boolean",
+      description:
+        "One line per model: price per image or second, inputs, limits; cheapest first. With --json, a small list instead of the whole catalog",
+    },
   ],
   examples: [
     "opensume models",
     "opensume models --kind video",
     "opensume models seedance",
     "opensume models gpt-image-2",
+    "opensume models --brief --json    # what an agent needs to pick a model, in a few KB",
   ],
   run: modelsCommand,
 };
@@ -62,6 +70,18 @@ async function modelsCommand(parsed: Parsed, ctx: Context): Promise<number> {
         )),
   );
 
+  if (parsed.flags.brief === true) {
+    const rows = briefModels(list);
+    if (ctx.json) ui.json(rows);
+    else {
+      ui.table(
+        ["MODEL", "KIND", "PRICE", "INPUTS", "LIMITS"],
+        rows.map((r) => [ui.c.bold(r.id), r.kind, briefPrice(r), r.inputs.join(", "), briefLimits(r)]),
+      );
+      ui.info(ui.c.dim(`\n${rows.length} models, cheapest first in each kind. Inputs: opensume schema <id>`));
+    }
+    return ExitCode.Ok;
+  }
   if (ctx.json) {
     ui.json(list);
     return ExitCode.Ok;
@@ -89,6 +109,62 @@ async function modelsCommand(parsed: Parsed, ctx: Context): Promise<number> {
 }
 
 const UNIT: Record<string, string> = { second: "/s", image: "/image", request: "/request" };
+
+/** What an agent needs to choose a model, without the whole catalog entry. */
+export interface BriefModel {
+  id: string;
+  kind: string;
+  /** Dollars per `per`, the cheapest option. */
+  usd_from: string;
+  /** Dollars per `per`, the dearest option, when it differs. */
+  usd_to?: string;
+  /** `image` or `second`. */
+  per: string;
+  inputs: string[];
+  seconds?: { min: number; max: number };
+  resolutions?: string[];
+}
+
+/** One `BriefModel` per model, by kind (image, video, lipsync, captions), cheapest first. */
+export function briefModels(list: readonly CatalogModel[]): BriefModel[] {
+  const kindOrder = (kind: string) => {
+    const index = (KINDS as readonly string[]).indexOf(kind);
+    return index === -1 ? KINDS.length : index;
+  };
+  return [...list]
+    .sort((a, b) => kindOrder(a.kind) - kindOrder(b.kind) || a.pricing.from_usd_micros - b.pricing.from_usd_micros)
+    .map((m) => {
+      const caps = (m.capabilities ?? {}) as Record<string, unknown>;
+      const seconds = caps.duration_seconds as { min?: unknown; max?: unknown } | undefined;
+      const resolutions = Array.isArray(caps.resolutions) ? (caps.resolutions as string[]) : [];
+      const to = m.pricing.to_usd;
+      return {
+        id: m.id,
+        kind: m.kind,
+        usd_from: m.pricing.from_usd,
+        ...(to && to !== m.pricing.from_usd ? { usd_to: to } : {}),
+        per: m.pricing.unit,
+        inputs: inputs(m).split(", ").filter(Boolean),
+        ...(typeof seconds?.min === "number" && typeof seconds.max === "number"
+          ? { seconds: { min: seconds.min, max: seconds.max } }
+          : {}),
+        ...(resolutions.length ? { resolutions } : {}),
+      };
+    });
+}
+
+export function briefPrice(r: BriefModel): string {
+  const unit = UNIT[r.per] ?? `/${r.per}`;
+  return `${formatUsd(r.usd_from)}${r.usd_to ? `–${formatUsd(r.usd_to)}` : ""}${unit}`;
+}
+
+export function briefLimits(r: BriefModel): string {
+  const parts: string[] = [];
+  if (r.resolutions?.length)
+    parts.push(r.resolutions.length > 2 ? `${r.resolutions[0]}–${r.resolutions.at(-1)}` : r.resolutions.join(", "));
+  if (r.seconds) parts.push(`${r.seconds.min}–${r.seconds.max} s`);
+  return parts.join(" · ");
+}
 
 /** `text-to-video, image-to-video` → `text, image`: what a model starts from. */
 export function inputs(m: Pick<CatalogModel, "modes">): string {

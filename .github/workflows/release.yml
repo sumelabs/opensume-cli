@@ -172,6 +172,14 @@ jobs:
         run: |
           sh install.sh
           test "$("$HOME/.opensume/bin/opensume" --version)" = "opensume $OPENSUME_VERSION"
+      - name: install.sh, then opensume in the same shell (~/.local/bin on PATH, as agents have)
+        if: runner.os != 'Windows'
+        env:
+          OPENSUME_VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          sh install.sh
+          test "$(opensume --version)" = "opensume $OPENSUME_VERSION"
       - name: install.ps1 (PowerShell 7)
         if: runner.os == 'Windows'
         shell: pwsh

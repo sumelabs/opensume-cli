@@ -2,7 +2,7 @@ import { stat } from "node:fs/promises";
 import { ApiError } from "../api/errors.ts";
 import type { Context } from "../context.ts";
 import type { CommandSpec } from "../lib/args.ts";
-import { DEFAULT_BASE_URL, maskKey, otherHostHint, WRONG_BASE_URL } from "../lib/config.ts";
+import { DEFAULT_BASE_URL, keySourceLabel, maskKey, otherHostHint, WRONG_BASE_URL } from "../lib/config.ts";
 import { ExitCode } from "../lib/errors.ts";
 import { VERSION } from "../version.ts";
 import { compareVersions, isStandaloneBinary, REPO } from "./update.ts";
@@ -167,7 +167,7 @@ async function runChecks(ctx: Context): Promise<Check[]> {
     });
   } else {
     const check = await timed(() => client.listJobs({ limit: 1 }, signal(15_000)));
-    const source = apiKeySource === "env" ? "SUME_API_KEY" : apiKeySource === "flag" ? "--api-key" : "saved key";
+    const source = keySourceLabel(apiKeySource);
     if (check.value) {
       checks.push({ name: "Key", status: "ok", detail: `${maskKey(apiKey)} (${source}) · accepted · ${check.ms}ms` });
     } else {

@@ -54,7 +54,7 @@ const status: CommandSpec = {
   run: async (_parsed, ctx) => {
     const { ui } = ctx;
     const { apiKey, apiKeySource, baseUrlSource, configPath } = ctx.settings;
-    const sources = { flag: "--api-key", env: "SUME_API_KEY", config: configPath };
+    const sources = { flag: "--api-key", env: "SUME_API_KEY", dotenv: "SUME_API_KEY in ./.env", config: configPath };
     const verdict = apiKey ? await checkKey(ctx, apiKey) : undefined;
 
     if (ctx.json) {

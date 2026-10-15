@@ -230,10 +230,10 @@ export class SumeClient {
   async request<T>(method: "GET" | "POST", path: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
     const auth = options.auth ?? "required";
     if (auth === "required" && !this.#apiKey) {
-      throw new CliError("No API key. Set SUME_API_KEY or run `opensume auth login`.", {
+      throw new CliError("No API key. Set SUME_API_KEY, put it in ./.env, or run `opensume auth login`.", {
         exitCode: ExitCode.Auth,
         code: "missing_api_key",
-        hint: "Create a key at https://open.sume.com/api-keys.",
+        hint: "A person makes the key at https://open.sume.com/api-keys (an agent cannot).",
       });
     }
     const url = this.url(path, options.query);

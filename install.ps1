@@ -95,7 +95,8 @@
   }
 
   Write-Host ''
-  Write-Host 'Next: create a key at https://open.sume.com/api-keys, then'
-  Write-Host '  opensume auth login'
+  Write-Host 'Next:'
+  Write-Host '  $env:SUME_API_KEY = "..."   # a person makes it at https://open.sume.com/api-keys (or put it in .\.env)'
+  Write-Host '  opensume init               # tell this project''s coding agents about opensume'
   Write-Host '  opensume run gpt-image-2 "a ceramic cup on a wooden table" -q low'
 }

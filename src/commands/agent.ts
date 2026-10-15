@@ -1,98 +1,123 @@
-import { readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import type { Context } from "../context.ts";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { dirname, relative, resolve } from "node:path";
 import type { CommandSpec } from "../lib/args.ts";
-import { DEFAULT_BASE_URL, DEV_BASE_URL, DOCS_URL, INSTALL, KEYS_URL, WRONG_BASE_URL } from "../lib/config.ts";
-import { CliError, ExitCode } from "../lib/errors.ts";
+import { DEFAULT_BASE_URL, DOCS_URL, INSTALL, KEYS_URL, keySourceLabel, WRONG_BASE_URL } from "../lib/config.ts";
+import { CliError, ExitCode, UsageError } from "../lib/errors.ts";
 import { VERSION } from "../version.ts";
+import { type BriefModel, briefLimits, briefModels, briefPrice } from "./models.ts";
 
-const SKILL_URL = "https://raw.githubusercontent.com/sumelabs/opensume-cli/main/skills/opensume/SKILL.md";
 const BEGIN = "<!-- BEGIN opensume -->";
 const END = "<!-- END opensume -->";
+const SKILL_DESCRIPTION =
+  "Generate images, video, lip-sync and captions with the Sume Open API through the `opensume` CLI. Use when the user " +
+  "asks to make or edit an image or a video clip, lip-sync a face to speech, burn captions into a video, compare media " +
+  "models or their prices, or check on a Sume generation job.";
 
-/** The commands an agent needs, in the order it needs them. */
+/** The commands of "Make something", with what each does. */
 const STEPS = [
-  ["opensume models --json", "models, kinds and prices"],
-  ["opensume schema <model> --json", "every input; each one is also a flag"],
-  ['opensume estimate <model> "<prompt>" --json', "the price in dollars, free"],
-  ['opensume run <model> "<prompt>" --max-usd 0.10 -o out/ --json', "submit, wait, save the file"],
-  ["opensume jobs wait <job_id> -o out/ --json", "pick up a long or interrupted job"],
+  ["opensume models --brief", "pick a model: price per image or second, inputs, limits"],
+  ['opensume run gpt-image-2 "a red kite over a beach" -q low -o out/', "waits, saves, prints the file path"],
+  ['opensume run seedance-2-mini "a paper boat" -d 4 -r 480p --max-usd 0.50 -o out/ --json', ""],
 ] as const;
 
 /**
- * The brief, as Markdown. The same text goes to stdout and, with --write,
- * into a marked block in an AGENTS.md, so it holds nothing machine-specific.
+ * The page an agent follows, as Markdown. It is the one source for
+ * `opensume agent`, the AGENTS.md block, the Claude skill and the Cursor
+ * rule, so it holds nothing machine-specific.
  */
 export function agentMarkdown(): string {
-  const width = Math.max(...STEPS.map(([command]) => command.length));
+  const width = Math.max(...STEPS.filter(([, what]) => what).map(([command]) => command.length));
   return [
-    "## opensume: the Sume Open API from the shell",
+    "## opensume: images and video from the Sume Open API",
     "",
-    "Images, video, lip-sync and captions from every open.sume.com model, priced in dollars. Every command takes `--json`.",
+    "`opensume` runs any open.sume.com model from the shell: it prices the request in dollars, waits for the job, and saves the file.",
     "",
-    "**Install**",
+    "**Setup, once**",
     "",
     "```sh",
     INSTALL.sh,
     "```",
     "",
-    `Windows: \`${INSTALL.powershell}\`. Node 22+: \`${INSTALL.npm}\`.`,
+    `Windows: \`${INSTALL.powershell}\`. No install, with Node 22+: put \`${INSTALL.npx}\` where these examples say \`opensume\`.`,
     "",
-    "**API**",
+    `- Key: \`SUME_API_KEY\`, read from the environment or from \`./.env\`. A person makes it at ${KEYS_URL}. Never print it, and never paste it into a chat or a command line.`,
+    `- Host: \`${DEFAULT_BASE_URL}\`, the default; nothing to set. Never \`${WRONG_BASE_URL}\`: that is sume.com's API, and Open keys fail there.`,
+    "- Check both: `opensume doctor`.",
     "",
-    `- Base URL: \`${DEFAULT_BASE_URL}\`, the default. \`SUME_API_BASE_URL\` or \`--base-url\` changes it.`,
-    `- Not \`${WRONG_BASE_URL}\`: that is sume.com's API, not Open's, and Open keys do not work there.`,
-    `- \`${DEV_BASE_URL}\` is Open's development API, for Sume staff, with its own keys (open.dev.sume.com).`,
-    `- Docs: ${DOCS_URL}`,
-    "",
-    "**Key**",
-    "",
-    `- The CLI reads it from \`SUME_API_KEY\` (made at ${KEYS_URL}). Never paste a key into a chat, a file in the repo, or a command line.`,
-    "- Or save it once: `printenv SUME_API_KEY | opensume auth login --with-key`.",
-    "- Check it: `opensume auth status --json` answers `valid: true`.",
-    "- Raw HTTP sends it as `Authorization: Bearer $SUME_API_KEY`.",
-    "",
-    "**Use**",
+    "**Make something**",
     "",
     "```sh",
-    ...STEPS.map(([command, what]) => `${command.padEnd(width)}  # ${what}`),
+    ...STEPS.map(([command, what]) => (what ? `${command.padEnd(width)}  # ${what}` : command)),
     "```",
     "",
-    "- Always pass `--max-usd`; over it, nothing is submitted (exit 7). A second submit is a second charge: resume with `jobs wait`.",
-    "- Exit codes: 0 ok, 2 bad flags, 3 key, 4 input refused, 5 job failed (refunded), 6 timed out, 7 funds or `--max-usd`, 8 rate limit, 130 interrupted.",
-    "- Errors in `--json` are `{error: {code, message, hint}}`. `OPENSUME_OUTPUT=json` makes every command print JSON without the flag.",
-    `- Every command and flag: \`opensume --help --json\`. Agent skill: ${SKILL_URL}`,
+    "- Name the model yourself: prices differ by more than 100× between models. Before a large spend, show the user `opensume estimate` with the same flags (free).",
+    '- `run` prints the saved file\'s path. With `--json` it prints `{"job", "usd", "artifacts": [{"path", "url", "content_type"}]}`; `OPENSUME_OUTPUT=json` does that without the flag.',
+    "- Cap the spend with `--max-usd`, or `OPENSUME_MAX_USD` for every run. Over the cap nothing is submitted (exit 7).",
+    "- Local files work wherever a URL does (`--image ./photo.png`, `--video`, `--audio`). Every field in `opensume schema <model>` is also a flag, like `--captions.style glass`.",
+    "- Long video: `--no-wait` returns the job id at once, and `opensume jobs wait <job> -o out/` saves it later. After a timeout (exit 6) or Ctrl-C (130) the job keeps running: resume it with `jobs wait`. Never resubmit; a second submit is a second charge.",
+    "",
+    "**When it fails**",
+    "",
+    "Exit codes: 1 network or server (retry), 2 bad flags, 3 key (follow `error.hint`), 4 input refused (fix what `error.message` says), " +
+      "5 job failed (refunded; `opensume jobs get <job>` says why), 6 timed out, 7 balance or cap, 8 rate limit. " +
+      'With `--json`, errors are `{"error": {"code", "message", "hint", "request_id"}}`. ' +
+      `Every command and flag: \`opensume --help --json\`. Docs: ${DOCS_URL}`,
   ].join("\n");
+}
+
+/** The page as a Claude Code skill (`.claude/skills/opensume/SKILL.md`, and this repo's `skills/`). */
+export function skillMarkdown(): string {
+  return `---\nname: opensume\ndescription: ${SKILL_DESCRIPTION}\n---\n\n${agentMarkdown()}\n`;
+}
+
+/** The page as a Cursor rule (`.cursor/rules/opensume.mdc`), applied when the agent finds it relevant. */
+export function cursorRule(): string {
+  return `---\ndescription: "${SKILL_DESCRIPTION.replaceAll('"', '\\"')}"\nglobs:\nalwaysApply: false\n---\n\n${agentMarkdown()}\n`;
 }
 
 export const agent: CommandSpec = {
   name: "agent",
   aliases: ["agents", "quickstart"],
   group: "Setup",
-  summary: "Print what an agent needs: install, API host, key, first commands",
+  summary: "Print what an agent needs: setup, the models and their prices, how to run",
   description:
-    "One page to hand to a coding agent, as Markdown (or --json): how to install the CLI, the API host and the " +
-    "one to avoid, how to pass the key without printing it, and the five commands that do the work. " +
-    "With --write, the same page goes into a marked block in an AGENTS.md; running it again replaces the block.",
+    "One page for a coding agent, as Markdown (or --json): the install line, where the key comes from, the API host and " +
+    "the one to avoid, the commands that make a file, and what each exit code means. Then what this machine uses, and " +
+    "every model with its price per image or second from the live catalog (free, no key). " +
+    "`opensume init` writes the same page into the project's agent files.",
   flags: [
     {
       name: "write",
       type: "string",
       placeholder: "<file>",
-      description: "Add or replace the opensume block in this file, such as AGENTS.md or CLAUDE.md",
+      description: "Add or replace the opensume block in this one file instead of printing",
     },
   ],
   examples: [
     "opensume agent",
-    "opensume agent --write AGENTS.md",
-    "opensume agent --json | jq -r .install.sh",
-    "opensume agent | pbcopy        # paste it into the agent's instructions",
+    "opensume agent --json | jq '.models[] | select(.kind == \"video\")'",
+    "opensume agent --write CLAUDE.md",
   ],
   run: async (parsed, ctx) => {
     const target = parsed.flags.write as string | undefined;
-    if (target !== undefined) return writeBlock(ctx, target);
+    if (target !== undefined) {
+      const result = await writeBlockFile(resolve(ctx.cwd, target));
+      if (ctx.json) ctx.ui.json(result);
+      else ctx.ui.success(`${verb(result.action)} the opensume block in ${target}`);
+      return ExitCode.Ok;
+    }
 
     const { apiKey, apiKeySource, baseUrl, baseUrlSource } = ctx.settings;
+    // The catalog is public, so the page can carry live prices without a key.
+    let models: BriefModel[] | undefined;
+    let modelsError: string | undefined;
+    try {
+      models = briefModels(await ctx.client().listModels(AbortSignal.any([ctx.signal, AbortSignal.timeout(8000)])));
+    } catch (error) {
+      if (ctx.signal.aborted) throw error;
+      modelsError = (error as Error).name === "TimeoutError" ? "timed out" : (error as Error).message;
+    }
+
     if (ctx.json) {
       ctx.ui.json({
         version: VERSION,
@@ -100,44 +125,132 @@ export const agent: CommandSpec = {
         base_url: baseUrl,
         base_url_source: baseUrlSource,
         default_base_url: DEFAULT_BASE_URL,
-        dev_base_url: DEV_BASE_URL,
         wrong_base_url: WRONG_BASE_URL,
         docs: DOCS_URL,
         key: {
           env: "SUME_API_KEY",
+          also_read_from: ".env",
           set: Boolean(apiKey),
           source: apiKeySource ?? null,
           create: KEYS_URL,
-          save: "printenv SUME_API_KEY | opensume auth login --with-key",
-          check: "opensume auth status --json",
           http_header: "Authorization: Bearer $SUME_API_KEY",
         },
-        commands: STEPS.map(([command, what]) => ({ command, what })),
+        spend_cap_env: "OPENSUME_MAX_USD",
+        models: models ?? null,
+        ...(modelsError ? { models_error: modelsError } : {}),
         exit_codes: Object.fromEntries(Object.entries(ExitCode).map(([name, code]) => [code, name])),
-        skill: SKILL_URL,
+        init: "opensume init",
         markdown: agentMarkdown(),
       });
       return ExitCode.Ok;
     }
 
-    ctx.ui.out(agentMarkdown());
-    // What this machine would use right now, after the shareable part.
-    const wrong = hostOf(baseUrl) === hostOf(WRONG_BASE_URL);
-    ctx.ui.out("");
-    ctx.ui.out("**This machine**");
-    ctx.ui.out("");
-    ctx.ui.out(`- opensume ${VERSION}`);
-    ctx.ui.out(`- API: ${baseUrl} (${baseUrlSource === "default" ? "default" : `from ${baseUrlSource}`})`);
-    ctx.ui.out(
+    const { ui } = ctx;
+    ui.out(agentMarkdown());
+    ui.out("");
+    ui.out("**This machine**");
+    ui.out("");
+    ui.out(`- opensume ${VERSION}`);
+    ui.out(`- API: ${baseUrl} (${baseUrlSource === "default" ? "default" : `from ${baseUrlSource}`})`);
+    ui.out(
       apiKey
-        ? `- Key: set (from ${apiKeySource === "env" ? "SUME_API_KEY" : apiKeySource === "flag" ? "--api-key" : "the saved config"}); check it with \`opensume auth status\``
-        : `- Key: none. Make one at ${KEYS_URL} and export SUME_API_KEY.`,
+        ? `- Key: set, from ${keySourceLabel(apiKeySource)}. \`opensume auth status\` checks it.`
+        : `- Key: none. A person makes one at ${KEYS_URL}; then export SUME_API_KEY or put it in ./.env.`,
     );
-    if (wrong)
-      ctx.ui.warn(`${baseUrl} is sume.com's API, not Open's. Unset SUME_API_BASE_URL to use ${DEFAULT_BASE_URL}.`);
+    if (ctx.env.OPENSUME_MAX_USD) ui.out(`- Spend cap: $${ctx.env.OPENSUME_MAX_USD} a run (OPENSUME_MAX_USD)`);
+    ui.out("");
+    if (models) {
+      ui.out("**Models now** (live catalog; cheapest first in each kind)");
+      ui.out("");
+      ui.out("```text");
+      for (const line of plainTable(
+        ["MODEL", "KIND", "PRICE", "INPUTS", "LIMITS"],
+        models.map((m) => [m.id, m.kind, briefPrice(m), m.inputs.join(", "), briefLimits(m)]),
+      ))
+        ui.out(line);
+      ui.out("```");
+    } else {
+      ui.out(`**Models now**: the catalog did not load (${modelsError}). Run \`opensume models --brief\` later.`);
+    }
+    if (hostOf(baseUrl) === hostOf(WRONG_BASE_URL))
+      ui.warn(`${baseUrl} is sume.com's API, not Open's. Unset SUME_API_BASE_URL to use ${DEFAULT_BASE_URL}.`);
     return ExitCode.Ok;
   },
 };
+
+type Target = "agents" | "claude" | "cursor";
+const TARGETS: readonly Target[] = ["agents", "claude", "cursor"];
+const TARGET_PATHS: Record<Target, string> = {
+  agents: "AGENTS.md",
+  claude: ".claude/skills/opensume/SKILL.md",
+  cursor: ".cursor/rules/opensume.mdc",
+};
+
+export const init: CommandSpec = {
+  name: "init",
+  group: "Setup",
+  summary: "Write the agent page into this project: AGENTS.md, a Claude skill, a Cursor rule",
+  description:
+    "Puts the page `opensume agent` prints where coding agents read instructions, so the next session knows the CLI " +
+    "without being told: a marked block in AGENTS.md (Codex, Cursor, Amp and others), .claude/skills/opensume/SKILL.md " +
+    "(Claude Code), and .cursor/rules/opensume.mdc when the project has a .cursor folder. Run it again to refresh them; " +
+    "it touches nothing else and makes no network calls. Commit the files so every agent on the project gets them.",
+  flags: [
+    {
+      name: "targets",
+      type: "string",
+      placeholder: "<list>",
+      description:
+        "Only these, comma-separated: agents, claude, cursor (default: agents and claude, plus cursor if .cursor/ exists)",
+    },
+  ],
+  examples: ["opensume init", "opensume init --targets agents", "opensume init --targets agents,claude,cursor --json"],
+  run: async (parsed, ctx) => {
+    const targets = await chooseTargets(ctx.cwd, parsed.flags.targets as string | undefined);
+    const files: { target: Target; path: string; action: Action }[] = [];
+    for (const target of targets) {
+      const path = resolve(ctx.cwd, TARGET_PATHS[target]);
+      const result =
+        target === "agents"
+          ? await writeBlockFile(path)
+          : await writeWholeFile(path, target === "claude" ? skillMarkdown() : cursorRule());
+      files.push({ target, ...result });
+    }
+    const next = 'opensume models --brief, then opensume run <model> "<prompt>" -o out/';
+    if (ctx.json) {
+      ctx.ui.json({ files, next });
+      return ExitCode.Ok;
+    }
+    for (const file of files) ctx.ui.success(`${verb(file.action)} ${relative(ctx.cwd, file.path)}`);
+    ctx.ui.info(ctx.ui.c.dim(`\nCommit them so every agent on this project reads them. Next: ${next}`));
+    return ExitCode.Ok;
+  },
+};
+
+async function chooseTargets(cwd: string, flag: string | undefined): Promise<Target[]> {
+  if (flag !== undefined) {
+    const names = flag
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean);
+    const wrong = names.find((name) => !(TARGETS as readonly string[]).includes(name));
+    if (wrong !== undefined || names.length === 0) {
+      throw new UsageError(`--targets takes agents, claude and cursor (got "${wrong ?? flag}").`);
+    }
+    return [...new Set(names)] as Target[];
+  }
+  const hasCursor = await stat(resolve(cwd, ".cursor")).then(
+    (s) => s.isDirectory(),
+    () => false,
+  );
+  return hasCursor ? ["agents", "claude", "cursor"] : ["agents", "claude"];
+}
+
+type Action = "created" | "added" | "updated" | "unchanged";
+
+function verb(action: Action): string {
+  return action === "unchanged" ? "Already up to date:" : `${action[0]?.toUpperCase()}${action.slice(1)}`;
+}
 
 function hostOf(url: string): string {
   try {
@@ -147,41 +260,60 @@ function hostOf(url: string): string {
   }
 }
 
-/** Put the brief between markers in `file`: replace the old block, or append one. */
-async function writeBlock(ctx: Context, file: string): Promise<number> {
-  const path = resolve(ctx.cwd, file);
-  const block = `${BEGIN}\n${agentMarkdown()}\n${END}`;
-  let existing: string | undefined;
+function plainTable(head: string[], rows: string[][]): string[] {
+  const widths = head.map((h, i) => Math.max(h.length, ...rows.map((r) => (r[i] ?? "").length)));
+  const line = (cells: string[]) =>
+    cells
+      .map((cell, i) => (i === cells.length - 1 ? cell : cell.padEnd(widths[i] ?? 0)))
+      .join("  ")
+      .trimEnd();
+  return [line(head), ...rows.map(line)];
+}
+
+async function readIfThere(path: string): Promise<string | undefined> {
   try {
-    existing = await readFile(path, "utf8");
+    return await readFile(path, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
   }
-  let next: string;
-  let action: "created" | "updated" | "added";
-  const start = existing?.indexOf(BEGIN) ?? -1;
-  const end = existing?.indexOf(END, start) ?? -1;
-  if (existing === undefined || existing.trim() === "") {
-    next = `${block}\n`;
-    action = "created";
-  } else if (start !== -1 && end !== -1) {
-    next = `${existing.slice(0, start)}${block}${existing.slice(end + END.length)}`;
-    action = "updated";
-  } else if (start !== -1 || existing.includes(END)) {
-    throw new CliError(`${file} has only one of the opensume markers.`, {
+}
+
+/** A file the CLI owns outright (the skill, the rule): write it whole. */
+async function writeWholeFile(path: string, content: string): Promise<{ path: string; action: Action }> {
+  const existing = await readIfThere(path);
+  if (existing === content) return { path, action: "unchanged" };
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, content, "utf8");
+  return { path, action: existing === undefined ? "created" : "updated" };
+}
+
+/** A file the project owns (AGENTS.md): replace only the block between the markers, or append one. */
+async function writeBlockFile(path: string): Promise<{ path: string; action: Action }> {
+  const existing = await readIfThere(path);
+  const { next, action } = mergeBlock(existing, `${BEGIN}\n${agentMarkdown()}\n${END}`, path);
+  if (action !== "unchanged") {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, next, "utf8");
+  }
+  return { path, action };
+}
+
+function mergeBlock(existing: string | undefined, block: string, name: string): { next: string; action: Action } {
+  if (existing === undefined || existing.trim() === "") return { next: `${block}\n`, action: "created" };
+  const start = existing.indexOf(BEGIN);
+  const end = start === -1 ? -1 : existing.indexOf(END, start);
+  if (start !== -1 && end !== -1) {
+    const next = `${existing.slice(0, start)}${block}${existing.slice(end + END.length)}`;
+    return { next, action: next === existing ? "unchanged" : "updated" };
+  }
+  if (start !== -1 || existing.includes(END)) {
+    throw new CliError(`${name} has only one of the opensume markers.`, {
       exitCode: ExitCode.Usage,
       code: "broken_markers",
       hint: `Remove the stray "${start !== -1 ? BEGIN : END}" line, then run this again.`,
     });
-  } else {
-    next = `${existing}${existing.endsWith("\n\n") ? "" : existing.endsWith("\n") ? "\n" : "\n\n"}${block}\n`;
-    action = "added";
   }
-  if (next !== existing) await writeFile(path, next, "utf8");
-  if (ctx.json) ctx.ui.json({ path, action: next === existing ? "unchanged" : action });
-  else
-    ctx.ui.success(
-      `${next === existing ? "Already up to date" : `${action[0]?.toUpperCase()}${action.slice(1)}`}: the opensume block in ${file}`,
-    );
-  return ExitCode.Ok;
+  const gap = existing.endsWith("\n\n") ? "" : existing.endsWith("\n") ? "\n" : "\n\n";
+  return { next: `${existing}${gap}${block}\n`, action: "added" };
 }

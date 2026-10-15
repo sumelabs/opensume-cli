@@ -76,7 +76,15 @@ Check it with `opensume --version`.
 
 ## Quick start
 
-**Setting up an agent?** Run `opensume agent` and give it the page: the install line, the API host, how to pass the key, and the five commands it needs. `opensume agent --write AGENTS.md` puts the same page into your project's AGENTS.md.
+**For a coding agent** the whole path is three commands, with no setup step in between:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sumelabs/opensume-cli/main/install.sh | sh  # on PATH in this same shell
+opensume init                                                       # AGENTS.md + Claude skill (+ Cursor rule)
+opensume run gpt-image-2 "a red kite over a beach" -q low -o out/   # prints the saved file's path
+```
+
+The key comes from `SUME_API_KEY` or `./.env`; a person makes it at open.sume.com → API keys. The host needs nothing. `opensume agent` prints the page `init` writes, followed by every model with its price per image or second.
 
 **1. Get a key.** Sign in at [open.sume.com](https://open.sume.com), open **API keys**, and create one. Then save it:
 
@@ -144,7 +152,8 @@ Try it
 | [`models`](#models) | List models and prices, or show one |
 | [`schema`](#schema) | Every input a model takes: type, limits, choices, flag |
 | [`jobs`](#jobs) | List, wait for, inspect, follow and cancel jobs |
-| [`agent`](#agent) | One page for an agent: install, API host, key, first commands |
+| [`agent`](#agent) | One page for an agent: setup, how to run, every model and its price |
+| [`init`](#agent) | Write that page into the project: AGENTS.md, a Claude skill, a Cursor rule |
 | [`auth`](#auth) | Save, check or forget your key |
 | [`doctor`](#doctor) | Check the install, the key and the connection |
 | `completion` | Shell completion for bash, zsh and fish |
@@ -217,7 +226,10 @@ opensume models --kind video            # image, video, lipsync or captions
 opensume models --company google
 opensume models seedance                # filter by any word
 opensume models veed-subtitles          # one model: inputs, limits, prices, notes
+opensume models --brief                 # one line each: price per image or second, inputs, limits; cheapest first
 ```
+
+`--brief --json` is the short list for an agent choosing a model: about 12 KB for the whole catalog instead of 85 KB.
 
 ### schema
 
@@ -254,12 +266,13 @@ opensume jobs cancel <id>           # only before generation starts; refunded
 ### agent
 
 ```sh
-opensume agent                      # one page, as Markdown: install, API host, key, first commands
-opensume agent --json               # the same, as fields (install.sh, default_base_url, key.set, …)
-opensume agent --write AGENTS.md    # add the page to a file between markers; rerun to refresh it
+opensume init                       # write the page into AGENTS.md and .claude/skills/opensume/SKILL.md (+ .cursor/rules if .cursor/ exists)
+opensume agent                      # print the page, what this machine uses, and every model with its price
+opensume agent --json               # the same as fields: install, default_base_url, key.set, models[], …
+opensume agent --write CLAUDE.md    # the page as a marked block in any one file
 ```
 
-The page is what an agent needs and nothing else: the one-line install for each platform, the base URL (`https://api.open.sume.com`) and the host to avoid (`https://api.sume.com`), how to pass the key without printing it (`SUME_API_KEY`, or `Authorization: Bearer` for raw HTTP), the five commands that do the work, `--max-usd`, and the exit codes. It ends with what this machine would use: the version, the API host and whether a key is set. It makes no network calls.
+The page is what an agent needs and nothing else: the install line, where the key comes from (`SUME_API_KEY` or `./.env`), the host (`https://api.open.sume.com`, nothing to set) and the one to avoid (`https://api.sume.com`), three commands that make a file, the spend cap, and what each exit code means. `init` and `--write` keep it between markers, so running them again refreshes the page and leaves the rest of the file alone; `init` makes no network calls. `agent` adds the live model list from the public catalog (no key).
 
 ### auth
 
@@ -274,7 +287,7 @@ opensume auth logout                                 # forget the saved key
 
 ```console
 $ opensume doctor
-✓ CLI     opensume 0.3.0 (bun 1.4.2, darwin arm64, standalone)
+✓ CLI     opensume 0.4.0 (bun 1.4.2, darwin arm64, standalone)
 ✓ Update  latest release
 ✓ Config  ~/.config/opensume/config.json (mode 600)
 ✓ API     https://api.open.sume.com · ok · build 5fadc7571 (open-v0.2.0) · public · 197ms
@@ -290,7 +303,7 @@ $ opensume doctor
 open.sume.com keys pay in US dollars from your open.sume.com balance; top up under **Billing**.
 
 - **Before you submit:** `opensume estimate` and `opensume run --dry-run` show the price for free. The estimate is what a completed job is charged.
-- **When you submit:** the price is reserved. With `--max-usd`, the CLI checks the estimate first and submits nothing if the price is higher (exit code 7).
+- **When you submit:** the price is reserved. With `--max-usd` (or `OPENSUME_MAX_USD` in the environment, for every run), the CLI checks the estimate first and submits nothing if the price is higher (exit code 7).
 - **When the job ends:** a completed job is charged; a failed or canceled job is refunded.
 - **Retries never double-charge:** every submit carries an `Idempotency-Key`, and a retried submit returns the original job. If the CLI gives up on a submit, the error prints the key (`idempotency_key` in `--json`); rerun with `--idempotency-key <key>` to adopt the job rather than create another.
 
@@ -352,11 +365,12 @@ curl -fsSL https://raw.githubusercontent.com/sumelabs/opensume-cli/main/skills/o
 
 | Setting | Flag | Environment | Saved in config |
 |---|---|---|---|
-| API key | `--api-key` | `SUME_API_KEY` | `opensume auth login` |
+| API key | `--api-key` | `SUME_API_KEY`, or that line in `./.env` | `opensume auth login` |
 | API host | `--base-url` | `SUME_API_BASE_URL` | `opensume auth login --base-url …` |
 | Output | `--json` | `OPENSUME_OUTPUT=json` (or `auto`) | |
+| Spend cap per run | `--max-usd` | `OPENSUME_MAX_USD` | |
 
-A flag beats the environment, which beats the config file. The config file is `~/.config/opensume/config.json` (`$XDG_CONFIG_HOME` is honored, `%APPDATA%\opensume` on Windows, or `$OPENSUME_CONFIG_DIR`). It is created readable by your user only. The key in it is not encrypted, so treat it like an SSH key, or use `SUME_API_KEY` instead.
+A flag beats the environment, which beats `./.env`, which beats the config file. From `./.env` the CLI reads `SUME_API_KEY` and nothing else: the API host never comes from a project file, so a cloned repo cannot send your saved key elsewhere. The config file is `~/.config/opensume/config.json` (`$XDG_CONFIG_HOME` is honored, `%APPDATA%\opensume` on Windows, or `$OPENSUME_CONFIG_DIR`). It is created readable by your user only. The key in it is not encrypted, so treat it like an SSH key, or use `SUME_API_KEY` instead.
 
 Color follows the terminal; `NO_COLOR=1` or `--no-color` turns it off and `FORCE_COLOR=1` turns it on. Completion caches model ids for a day under `~/.cache/opensume`.
 

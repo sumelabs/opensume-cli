@@ -6,7 +6,7 @@
 # Settings (environment variables):
 #   OPENSUME_VERSION         a release like 0.1.0 (default: the latest)
 #   OPENSUME_INSTALL_DIR     where the binary goes (default: ~/.opensume/bin)
-#   OPENSUME_NO_MODIFY_PATH  set to 1 to leave your shell profile alone
+#   OPENSUME_NO_MODIFY_PATH  set to 1 to leave your shell profile and ~/.local/bin alone
 #
 # The download is checked against the release's checksums.txt (SHA-256)
 # before anything is installed.
@@ -107,6 +107,20 @@ case ":$PATH:" in
   *) on_path=0 ;;
 esac
 
+# Usable in this same shell: link into ~/.local/bin when it is already on PATH
+# (agents run each command in a fresh non-login shell that never reads a profile).
+local_bin="$HOME/.local/bin"
+if [ "$on_path" = 0 ] && [ "${OPENSUME_NO_MODIFY_PATH:-0}" != "1" ]; then
+  case ":$PATH:" in
+    *":$local_bin:"*)
+      if mkdir -p "$local_bin" 2>/dev/null && ln -sf "$INSTALL_DIR/opensume" "$local_bin/opensume" 2>/dev/null; then
+        on_path=1
+        say "${DIM}Linked $local_bin/opensume, which is on your PATH${RESET}"
+      fi
+      ;;
+  esac
+fi
+
 if [ "$on_path" = 0 ]; then
   line="export PATH=\"$INSTALL_DIR:\$PATH\""
   profile=""
@@ -130,9 +144,11 @@ if [ "$on_path" = 0 ]; then
     say ""
     say "Add opensume to your PATH:  $line"
   fi
+  say "Until then, run it as $INSTALL_DIR/opensume"
 fi
 
 say ""
-say "Next: create a key at https://open.sume.com/api-keys, then"
-say "  opensume auth login"
+say "Next:"
+say "  export SUME_API_KEY=...   # a person makes it at https://open.sume.com/api-keys (or put it in ./.env)"
+say "  opensume init             # tell this project's coding agents about opensume"
 say "  opensume run gpt-image-2 \"a ceramic cup on a wooden table\" -q low"
