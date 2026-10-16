@@ -287,7 +287,7 @@ opensume auth logout                                 # forget the saved key
 
 ```console
 $ opensume doctor
-✓ CLI     opensume 0.4.3 (bun 1.4.2, darwin arm64, standalone)
+✓ CLI     opensume 0.4.4 (bun 1.4.2, darwin arm64, standalone)
 ✓ Update  latest release
 ✓ Config  ~/.config/opensume/config.json (mode 600)
 ✓ API     https://api.open.sume.com · ok · build 5fadc7571 (open-v0.2.0) · public · 197ms

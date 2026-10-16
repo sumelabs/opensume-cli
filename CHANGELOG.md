@@ -4,6 +4,8 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-10-16
+
 ### Fixed
 
 - **`schema <model>` lists that model's inputs, not the whole endpoint's.** It narrows the vendored router schema with the model's row in the live catalog, the one the API checks requests against. Fields the model does not take are dropped (`seedance-1.5-pro` no longer offers `video_url`, `audio_url`, `captions`, `end_image_url` or the reference lists), and its own choices and limits replace the router's widest (`resolution` 480p|720p|1080p, `duration` 4–12 instead of 2–600, its aspect ratios, qualities, formats and image count). A field the catalog says nothing about is kept. Offline, it lists the whole endpoint as before and says so. `--json` adds `narrowed_to_model`. Found in the production QA of the Open API (sume #13628).
@@ -156,7 +158,8 @@ The first release: every model on open.sume.com, from the terminal.
 - Standalone binaries for macOS (arm64, x64), Linux (x64, arm64; glibc and musl) and Windows x64, built to run on CPUs without AVX2. Checksum-verified `install.sh` and `install.ps1`, an npm tarball on each release, and `opensume update`.
 - An agent skill in `skills/opensume`.
 
-[Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/sumelabs/opensume-cli/compare/v0.4.4...HEAD
+[0.4.4]: https://github.com/sumelabs/opensume-cli/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/sumelabs/opensume-cli/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/sumelabs/opensume-cli/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/sumelabs/opensume-cli/compare/v0.4.0...v0.4.1
