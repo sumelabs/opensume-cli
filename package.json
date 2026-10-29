@@ -51,9 +51,9 @@
     "schema:check": "node scripts/sync-schema.mjs --check"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.15",
+    "@biomejs/biome": "2.6.3",
     "@types/node": "22.20.5",
-    "typescript": "5.9.3",
-    "vitest": "5.0.4"
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
   }
 }
